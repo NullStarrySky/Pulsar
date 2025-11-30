@@ -9,6 +9,8 @@ mod error;
 use std::sync::Arc;
 use remote_service::{RemoteServiceState, init_remote_service};
 use tauri::{Manager, WindowEvent};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,15 +58,65 @@ pub fn run() {
                 {
                   app.handle().plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--flag1", "--flag2"])))?;
                   app.handle().plugin(tauri_plugin_positioner::init())?;
+
+                  // 创建托盘菜单
+                  let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+                  let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+                  let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+                  // 创建托盘图标
                   tauri::tray::TrayIconBuilder::new()
+                      .icon(app.default_window_icon().unwrap().clone())
+                      .menu(&menu)
+                      .show_menu_on_left_click(false)
+                      .on_menu_event(|app, event| {
+                          match event.id.as_ref() {
+                              "show" => {
+                                  if let Some(window) = app.get_webview_window("main") {
+                                      let _ = window.show();
+                                      let _ = window.set_focus();
+                                  }
+                              }
+                              "quit" => {
+                                  // 退出前先清理sidecar进程
+                                  let app_handle = app.clone();
+                                  tauri::async_runtime::spawn(async move {
+                                      let state = app_handle.state::<sidecar_manager::SidecarState>();
+                                      let mut child_lock = state.child_process.lock().await;
+                                      if let Some(child) = child_lock.take() {
+                                          if let Err(e) = child.kill() {
+                                              eprintln!("Failed to kill sidecar process on quit: {}", e);
+                                          } else {
+                                              println!("Sidecar process terminated successfully on quit.");
+                                          }
+                                      }
+                                      // 清理完成后退出
+                                      app_handle.exit(0);
+                                  });
+                              }
+                              _ => {}
+                          }
+                      })
                       .on_tray_icon_event(|tray_handle, event| {
-                        tauri_plugin_positioner::on_tray_event(tray_handle.app_handle(), &event);
+                          tauri_plugin_positioner::on_tray_event(tray_handle.app_handle(), &event);
+                          // 左键点击显示窗口
+                          if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                              if let Some(window) = tray_handle.app_handle().get_webview_window("main") {
+                                  let _ = window.show();
+                                  let _ = window.set_focus();
+                              }
+                          }
                       })
                       .build(app)?;
                 }
               Ok(())
             })
         .on_window_event(|window, event| match event {
+            // 关闭窗口时隐藏到托盘而不是退出
+            WindowEvent::CloseRequested { api, .. } => {
+                let _ = window.hide();
+                api.prevent_close();
+            }
             WindowEvent::Destroyed => {
                 if window.app_handle().webview_windows().len() == 1 {
                     println!("Last window closed, terminating sidecar process...");

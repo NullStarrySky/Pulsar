@@ -22,7 +22,7 @@ const topButtons = [
 ];
 
 const bottomButtons = [
-  { svg: Settings, onClick: "setting", title: "Settings" },
+  { svg: Settings, onClick: "setting.json", title: "Settings" },
 ];
 </script>
 
