@@ -50,7 +50,10 @@ class SettingWrapper {
   constructor(resources: { path: string; content: Setting }[]) {
     if (!resources || resources.length === 0) {
       console.warn("Setting resource not provided, using default settings.");
-      this.resource = { path: "default/setting.json", content: newSetting() };
+      this.resource = {
+        path: "default/setting.[setting].json",
+        content: newSetting(),
+      };
     } else {
       if (resources.length > 1) {
         console.warn(

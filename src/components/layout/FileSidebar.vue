@@ -36,13 +36,6 @@ function handleTabDragLeave() {
 </script>
 
 <template>
-  <!--
-    修改点：
-    1. 移除 v-if
-    2. 添加 transition-all 和 duration-300 实现动画
-    3. 根据 store.uiState.isFileSidebarOpen 动态切换宽度、透明度和内边距
-    4. 添加 overflow-hidden 防止关闭时内容溢出
-  -->
   <aside
     class="shrink-0 bg-background flex flex-col transition-all duration-300 ease-in-out overflow-hidden border-r-0"
     :class="[

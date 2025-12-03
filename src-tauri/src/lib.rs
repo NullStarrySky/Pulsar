@@ -1,4 +1,5 @@
 // src-tauri/src/lib.rs
+
 mod backup;
 mod secrets_manager;
 mod script_manager;
@@ -6,13 +7,63 @@ mod sidecar_manager;
 mod remote_service;
 mod error;
 
+use std::collections::HashMap; // 引入 HashMap
 use std::sync::Arc;
 use remote_service::{RemoteServiceState, init_remote_service};
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent}; // 引入 RunEvent
+use tokio::sync::Mutex; // 确保 Mutex 被引入
+
+/// 统一的子进程清理函数
+/// 这个函数会阻塞式地执行清理，以确保在应用退出前完成
+fn cleanup_child_processes(handle: &tauri::AppHandle) {
+    println!("Starting cleanup of child processes...");
+
+    // 创建一个新的、单线程的 tokio 运行时来同步执行异步的清理代码
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        // 关闭 sidecar
+        let sidecar_state = handle.state::<sidecar_manager::SidecarState>();
+        if let Some(child) = sidecar_state.child_process.lock().await.take() {
+            println!("Shutting down sidecar process...");
+            if let Err(e) = child.kill() {
+                eprintln!("Failed to kill sidecar process: {}", e);
+            } else {
+                println!("Sidecar process terminated.");
+            }
+        }
+
+        // 关闭所有脚本
+        let script_state = handle.state::<script_manager::ScriptProcessState>();
+        let mut children_lock = script_state.children.lock().await;
+        let paths: Vec<String> = children_lock.keys().cloned().collect();
+
+        if !paths.is_empty() {
+            println!("Shutting down {} script process(es)...", paths.len());
+        }
+
+        for path in paths {
+            if let Some(child) = children_lock.remove(&path) {
+                if let Err(e) = child.kill() {
+                    eprintln!("Failed to kill script process for {}: {}", path, e);
+                } else {
+                    println!("Script process for {} terminated.", path);
+                }
+            }
+        }
+    });
+    println!("Cleanup of child processes finished.");
+}
+
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // 将 Builder 的结果赋值给一个变量 `app`
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
@@ -30,6 +81,9 @@ pub fn run() {
         .manage(sidecar_manager::SidecarState {
             child_process: Default::default(),
         })
+        .manage(script_manager::ScriptProcessState { // 添加 ScriptProcessState
+               children: Mutex::new(HashMap::new()),
+           })
         // 注册所有命令
         .invoke_handler(tauri::generate_handler![
             sidecar_manager::initialize_sidecar,
@@ -65,32 +119,25 @@ pub fn run() {
               Ok(())
             })
         .on_window_event(|window, event| match event {
-            WindowEvent::Destroyed => {
-                if window.app_handle().webview_windows().len() == 1 {
-                    println!("Last window closed, terminating sidecar process...");
+                  WindowEvent::Destroyed => {
+                      // 当最后一个窗口被销毁时，执行清理。
+                      // len() <= 1 是因为在这个事件触发时，被销毁的窗口可能还在窗口列表中。
+                      if window.app_handle().webview_windows().len() <= 1 {
+                          println!("Last window destroyed, cleaning up child processes...");
+                          cleanup_child_processes(&window.app_handle());
+                      }
+                  }
+                  _ => {}
+              })
+              .build(tauri::generate_context!())
+              .expect("error while running tauri application");
 
-                    let app_handle = window.app_handle().clone();
-
-                    // 在异步任务中终止子进程，以避免阻塞UI线程
-                    tauri::async_runtime::spawn(async move {
-                        // 现在 `app_handle` 是一个独立的副本，拥有 'static 生命周期
-                        let state = app_handle.state::<sidecar_manager::SidecarState>();
-                        let mut child_lock = state.child_process.lock().await;
-
-                        // 使用 take() 将值从 Option 中移出，并留下 None
-                        if let Some(child) = child_lock.take() {
-                            // 尝试终止子进程
-                            if let Err(e) = child.kill() {
-                                eprintln!("Failed to kill sidecar process: {}", e);
-                            } else {
-                                println!("Sidecar process terminated successfully.");
-                            }
-                        }
-                    });
-                }
-            }
-            _ => {}
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
+          // 调用 .run() 并传入一个闭包来处理应用级别的事件
+          app.run(|app_handle, event| {
+              if let RunEvent::ExitRequested { .. } = event {
+                  println!("Application exit requested, cleaning up child processes...");
+                  cleanup_child_processes(app_handle);
+                  // 这里不需要调用 api.prevent_exit()，因为我们的清理函数是同步阻塞的。
+              }
+          });
+      }

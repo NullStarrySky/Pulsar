@@ -10,6 +10,8 @@ import { vertex } from "@ai-sdk/google-vertex";
 import { deepseek } from "@ai-sdk/deepseek";
 import { xai } from "@ai-sdk/xai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+// 引入新的类型定义
+import { ModelConfig } from "../schema/modelConfig/modelConfig.types";
 
 // 定义内置提供商及其对应的 SDK 对象
 const providers: Record<string, any> = {
@@ -34,18 +36,8 @@ const purposeMethodMap: Record<string, string[]> = {
 // =================================================================================
 // 类型定义
 // =================================================================================
-type CustomProviderConfig = {
-  name: string;
-  baseURL: string;
-  apiKeyName: string;
-  url?: string;
-};
 
-export type ModelConfig = {
-  customProviders?: CustomProviderConfig[];
-};
-
-// 新增：创建并返回一个配置好的 MockLanguageModelV2 实例
+// 创建并返回一个配置好的 MockLanguageModelV2 实例
 function createTestModel(modelId: string): MockLanguageModelV2 {
   const streamId = "test-stream-id-1"; // V2 规范通常需要一个 ID 来关联 start/delta/end
 
@@ -155,7 +147,7 @@ function createTestModel(modelId: string): MockLanguageModelV2 {
 export function hydrateModel(
   identifier: string,
   purpose: string,
-  modelConfig: ModelConfig,
+  modelConfig: ModelConfig, // <-- 使用导入的新类型
   secrets: Record<string, string>
 ): any {
   const [providerName, ...modelIdParts] = identifier.split("/");
@@ -178,18 +170,18 @@ export function hydrateModel(
     return createTestModel(modelId);
   }
 
-  const provider = providers[lowerCaseProviderName];
+  const builtInProvider = providers[lowerCaseProviderName];
 
   // --- 逻辑分支 1: 处理内置提供商 ---
-  if (provider) {
+  if (builtInProvider) {
     const methods = purposeMethodMap[purpose];
     if (!methods) {
       throw new Error(`Unsupported purpose: "${purpose}"`);
     }
 
     for (const method of methods) {
-      if (typeof provider[method] === "function") {
-        return provider[method](modelId);
+      if (typeof builtInProvider[method] === "function") {
+        return builtInProvider[method](modelId);
       }
     }
 
@@ -198,28 +190,37 @@ export function hydrateModel(
     );
   }
 
-  // --- 逻辑分支 2: 处理自定义提供商 ---
-  const customProviderConfig = modelConfig.customProviders?.find(
-    (p) => p.name.toLowerCase() === lowerCaseProviderName
-  );
+  // --- 逻辑分支 2: 处理自定义提供商 (重写部分) ---
+  const providerData = Object.entries(modelConfig).find(
+    ([name, data]) =>
+      name.toLowerCase() === lowerCaseProviderName && !data.builtIn
+  )?.[1]; // 查找键名匹配且不是内置的提供商
 
-  if (!customProviderConfig) {
+  if (!providerData) {
     throw new Error(
-      `Custom provider "${providerName}" not found in modelConfig.[modelConfig].json.`
+      `Custom provider "${providerName}" not found or is a built-in provider in modelConfig.[modelConfig].json.`
     );
   }
 
-  const apiKey = secrets[customProviderConfig.apiKeyName];
+  if (!providerData.url) {
+    throw new Error(
+      `Custom provider "${providerName}" is missing the required "url" field.`
+    );
+  }
+
+  const apiKey = secrets[providerData.apiKeyName];
   if (!apiKey) {
     throw new Error(
-      `API key "${customProviderConfig.apiKeyName}" for custom provider "${providerName}" not found in AISecrets.json.`
+      `API key "${providerData.apiKeyName}" for custom provider "${providerName}" not found in AISecrets.json.`
     );
   }
 
   const customProvider = createOpenAICompatible({
-    name: customProviderConfig.name,
+    // 注意：这里的 'name' 字段在 createOpenAICompatible 中不是必需的，
+    // 但为了清晰起见，我们保留它。重要的是 baseURL 和 apiKey。
+    name: lowerCaseProviderName,
     apiKey: apiKey,
-    baseURL: customProviderConfig.baseURL,
+    baseURL: providerData.url,
   });
 
   const methods = purposeMethodMap[purpose];

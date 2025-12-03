@@ -1,20 +1,20 @@
 // src/features/FileSystem/FileTree/composables/useFileTree.ts
 import { ref, computed, watch, onMounted, type Ref } from "vue";
-import join from "url-join";
 import {
   useFileSystemStore,
-  isFolderNode,
-  type FolderContent,
+  VirtualFolder,
+  VirtualFile,
 } from "@/features/FileSystem/FileSystem.store";
-import { basename } from "@/features/FileSystem/fs.api";
 
 export interface FlatTreeItem {
   type: "folder" | "file" | "input";
-  path: string; // 对于 input 类型，这是 parentPath
+  path: string;
   name: string;
+  parentPath: string | null;
   indentLevel: number;
   isExpanded?: boolean;
-  id?: string; // 用于 input 的唯一标识
+  isFolder?: boolean;
+  id?: string; // 用于 input 的唯一键
 }
 
 export function useFileTree(
@@ -26,15 +26,17 @@ export function useFileTree(
   const editingNodeId = ref<string | null>(null);
   const newName = ref("");
 
-  // Storage Persistence
-  const storageKey = `VFS_expandedFolders_${rootPath}`;
+  // Storage Persistence (Keyed by rootPath to support multiple tree instances)
+  const storageKey = `VFS_expanded_${rootPath}`;
 
   onMounted(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) expandedFolders.value = new Set(JSON.parse(saved));
-    } catch (e) {
-      console.error(e);
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      try {
+        expandedFolders.value = new Set(JSON.parse(saved));
+      } catch (e) {
+        /* ignore */
+      }
     }
   });
 
@@ -51,11 +53,14 @@ export function useFileTree(
     else expandedFolders.value.add(path);
   };
 
-  const startEdit = async (pathOrId: string, isCreation = false) => {
-    // isCreation logic handled by caller creating a specific ID format
+  const startEdit = (pathOrId: string, isCreation = false) => {
     editingNodeId.value = pathOrId;
-    if (isCreation) newName.value = "";
-    else newName.value = await basename(pathOrId);
+    if (isCreation) {
+      newName.value = "";
+    } else {
+      const node = store.resolvePath(pathOrId);
+      newName.value = node ? node.name : "";
+    }
   };
 
   const cancelEdit = () => {
@@ -64,88 +69,100 @@ export function useFileTree(
   };
 
   const flatList = computed<FlatTreeItem[]>(() => {
-    const query = searchQuery.value?.trim().toLowerCase();
+    if (!store.isInitialized) return [];
 
-    // Search Mode
+    const rootNode = store.resolvePath(rootPath);
+    if (!(rootNode instanceof VirtualFolder)) return [];
+
+    const query = searchQuery.value?.trim().toLowerCase();
+    const list: FlatTreeItem[] = [];
+
+    // --- Search Mode ---
     if (query) {
-      const results: FlatTreeItem[] = [];
-      const traverse = (path: string, node: any) => {
-        const name = path.split("/").pop()!;
-        if (name.toLowerCase().includes(query)) {
-          results.push({
-            type: isFolderNode(node) ? "folder" : "file",
-            path,
-            name,
+      const traverse = (node: VirtualFolder | VirtualFile) => {
+        if (node.name.toLowerCase().includes(query) && node.path !== rootPath) {
+          list.push({
+            type: node instanceof VirtualFolder ? "folder" : "file",
+            path: node.path,
+            name: node.name,
+            parentPath: node.parent?.path ?? null,
             indentLevel: 0,
             isExpanded: false,
+            isFolder: node instanceof VirtualFolder,
           });
         }
-        if (isFolderNode(node)) {
-          Object.entries(node).forEach(([k, v]) => traverse(join(path, k), v));
+        if (node instanceof VirtualFolder) {
+          for (const child of node.children.values()) {
+            if (child instanceof VirtualFolder) traverse(child);
+          }
         }
       };
-      const root = store.getNodeByPath(store.fileStructure, rootPath);
-      if (root) traverse(rootPath, root);
-      return results.slice(1); // Skip root itself if needed
+      traverse(rootNode);
+      return list;
     }
 
-    // Normal Mode
-    const list: FlatTreeItem[] = [];
-    const traverse = (currentPath: string, level: number) => {
-      const node = store.getNodeByPath<FolderContent>(
-        store.fileStructure,
-        currentPath
-      );
-      if (!node) return;
-
-      // Check if we are creating a new item inside this folder
+    // --- Tree Mode ---
+    const traverse = (folder: VirtualFolder, level: number) => {
+      // 1. Check for "New Item" input placeholder
       if (
         editingNodeId.value?.startsWith(`new:`) &&
-        editingNodeId.value.includes(`:${currentPath}:`)
+        editingNodeId.value.includes(`:${folder.path}:`)
       ) {
         list.push({
           type: "input",
           id: editingNodeId.value,
-          path: currentPath,
+          path: folder.path, // Parent path
           name: "",
+          parentPath: folder.path,
           indentLevel: level,
         });
       }
 
-      const children = Object.entries(node);
-      const folders = children
-        .filter(([, v]) => isFolderNode(v))
-        .sort(([a], [b]) => a.localeCompare(b));
-      const files = children
-        .filter(([, v]) => !isFolderNode(v))
-        .sort(([a], [b]) => a.localeCompare(b));
+      // 2. Sort children: Folders first, then Files, both alphabetical
+      const children = Array.from(folder.children.values());
+      children.sort((a, b) => {
+        const aIsDir = a instanceof VirtualFolder;
+        const bIsDir = b instanceof VirtualFolder;
+        if (aIsDir && !bIsDir) return -1;
+        if (!aIsDir && bIsDir) return 1;
+        return a.name.localeCompare(b.name);
+      });
 
-      [...folders, ...files].forEach(([name, childNode]) => {
-        const childPath = join(currentPath, name);
-
-        if (editingNodeId.value === childPath) {
+      // 3. Process children
+      for (const node of children) {
+        if (editingNodeId.value === node.path) {
+          // Edit Mode Placeholder
           list.push({
             type: "input",
-            id: childPath,
-            path: currentPath,
-            name,
+            id: node.path,
+            path: node.path,
+            name: node.name,
+            parentPath: folder.path,
             indentLevel: level,
           });
         } else {
-          const isFolder = isFolderNode(childNode);
-          const expanded = expandedFolders.value.has(childPath);
+          // View Mode Item
+          const isFolder = node instanceof VirtualFolder;
+          const isExpanded = isFolder && expandedFolders.value.has(node.path);
+
           list.push({
             type: isFolder ? "folder" : "file",
-            path: childPath,
-            name,
+            path: node.path,
+            name: node.name,
+            parentPath: folder.path,
             indentLevel: level,
-            isExpanded: expanded,
+            isExpanded,
+            isFolder,
           });
-          if (isFolder && expanded) traverse(childPath, level + 1);
+
+          if (isFolder && isExpanded) {
+            traverse(node as VirtualFolder, level + 1);
+          }
         }
-      });
+      }
     };
-    traverse(rootPath, 0);
+
+    traverse(rootNode, 0);
     return list;
   });
 

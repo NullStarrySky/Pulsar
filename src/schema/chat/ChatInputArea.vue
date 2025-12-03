@@ -5,33 +5,32 @@ import { type role } from "../shared.types.ts";
 import {
   Paperclip,
   Send,
+  Sparkles,
   X,
   User,
   Bot,
   Cog,
-  Sparkles,
-  PanelTopClose,
-  PanelTopOpen,
   Wand2,
+  ChevronDown,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
 
-// 定义 Props 和 Emits，解耦具体业务
 const props = defineProps<{
   disabled?: boolean;
 }>();
@@ -51,12 +50,24 @@ const newMessage = ref("");
 const newMessageRole = ref<role>("user");
 const attachedFiles = ref<File[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
-const isCollapsed = ref(false);
 
-const roleIcons: Record<role, any> = {
-  user: User,
-  assistant: Bot,
-  system: Cog,
+// 角色对应的样式和配置
+const roleConfig = {
+  user: {
+    icon: User,
+    label: "用户",
+    colorClass: "ring-primary/20 focus-within:ring-primary/50",
+  },
+  assistant: {
+    icon: Bot,
+    label: "助手",
+    colorClass: "ring-purple-500/20 focus-within:ring-purple-500/50",
+  },
+  system: {
+    icon: Cog,
+    label: "系统",
+    colorClass: "ring-slate-500/20 focus-within:ring-slate-500/50",
+  },
 };
 
 const canSend = computed(
@@ -69,128 +80,111 @@ function triggerFileInput() {
 
 function handleFileSelect(event: Event) {
   const target = event.target as HTMLInputElement;
-  if (target.files) {
-    attachedFiles.value.push(...Array.from(target.files));
-  }
-}
-
-function removeAttachment(index: number) {
-  attachedFiles.value.splice(index, 1);
+  if (target.files) attachedFiles.value.push(...Array.from(target.files));
 }
 
 function handleSend(generate: boolean = false) {
   if (!canSend.value || props.disabled) return;
+
+  // 如果是用户发送，默认触发生成；如果是替助手/系统发，默认不生成（除非强制）
+  const shouldGenerate = generate || newMessageRole.value === "user";
 
   emit(
     "send",
     newMessage.value,
     [...attachedFiles.value],
     newMessageRole.value,
-    generate
+    shouldGenerate
   );
 
-  // Reset
   newMessage.value = "";
   attachedFiles.value = [];
   if (fileInput.value) fileInput.value.value = "";
 }
-function handlePolish() {
-  if (!newMessage.value.trim() || props.disabled) return;
-  emit("polish", newMessage.value, newMessageRole.value);
-}
 
-// 暴露给父组件的方法
 const setDraft = (text: string) => {
   newMessage.value = text;
 };
-
-defineExpose({
-  setDraft,
-});
+defineExpose({ setDraft });
 </script>
 
 <template>
-  <div class="relative border-t p-4 pt-5">
-    <TooltipProvider :delay-duration="200">
-      <Tooltip>
-        <TooltipTrigger as-child>
-          <Button
-            variant="outline"
-            size="icon"
-            class="absolute left-4 -top-[1.1rem] z-10 h-8 w-8 rounded-full bg-background"
-            @click="isCollapsed = !isCollapsed"
-          >
-            <PanelTopClose v-if="!isCollapsed" class="size-4" />
-            <PanelTopOpen v-else class="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>{{ isCollapsed ? "展开输入框" : "折叠输入框" }}</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-
-    <div v-if="!isCollapsed" class="space-y-3">
-      <!-- 文件展示区 -->
-      <div v-if="attachedFiles.length > 0" class="flex flex-wrap gap-2">
+  <div class="relative w-full max-w-4xl mx-auto px-4 pb-6 pt-2 z-20">
+    <!-- 悬浮岛容器 -->
+    <div
+      class="relative flex flex-col bg-background shadow-xl border rounded-2xl transition-all duration-300 ring-1"
+      :class="[
+        roleConfig[newMessageRole].colorClass,
+        disabled ? 'opacity-60 pointer-events-none' : '',
+      ]"
+    >
+      <!-- 文件预览区 -->
+      <div
+        v-if="attachedFiles.length > 0"
+        class="flex flex-wrap gap-2 px-3 pt-3"
+      >
         <Badge
-          v-for="(file, index) in attachedFiles"
-          :key="file.name + index"
+          v-for="(file, i) in attachedFiles"
+          :key="i"
           variant="secondary"
-          class="flex items-center gap-1.5"
+          class="pl-2 pr-1 h-7"
         >
-          <span>{{ file.name }}</span>
+          <span class="max-w-[120px] truncate text-xs">{{ file.name }}</span>
           <button
-            class="rounded-full hover:bg-muted-foreground/20"
-            @click="removeAttachment(index)"
+            class="ml-1 hover:text-destructive"
+            @click="attachedFiles.splice(i, 1)"
           >
-            <X class="size-3" />
+            <X class="w-3 h-3" />
           </button>
         </Badge>
       </div>
 
-      <!-- 输入框 -->
-      <div class="relative">
-        <Textarea
-          v-model="newMessage"
-          placeholder="输入消息..."
-          class="w-full resize-none pr-10 min-h-10"
-          rows="1"
-          @keydown.enter.exact.prevent="() => handleSend(false)"
-        />
-        <Button
-          size="icon"
-          :disabled="!canSend || disabled"
-          @click="() => handleSend(false)"
-          class="absolute right-1.5 bottom-[5px] h-7 w-7"
-        >
-          <Send class="size-4" />
-        </Button>
-      </div>
+      <!-- 输入区域 -->
+      <Textarea
+        v-model="newMessage"
+        placeholder="输入消息..."
+        class="w-full resize-none border-0 bg-transparent focus-visible:ring-0 px-4 py-3 min-h-[52px] max-h-[200px] text-base"
+        rows="1"
+        @keydown.enter.exact.prevent="handleSend(false)"
+      />
 
-      <!-- 工具栏 -->
-      <div class="flex w-full items-center justify-between">
+      <!-- 底部工具栏 -->
+      <div class="flex items-center justify-between px-2 pb-2 mt-1">
+        <!-- 左侧：功能区 -->
         <div class="flex items-center gap-1">
-          <!-- 在 Role Selector 之前或之后添加润色按钮 -->
-          <TooltipProvider :delay-duration="200">
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-8 w-8 text-muted-foreground hover:text-primary"
-                  :disabled="!newMessage.trim() || disabled"
-                  @click="handlePolish"
-                >
-                  <Wand2 class="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>润色当前输入 (Polish)</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <!-- 身份切换 -->
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+              >
+                <component
+                  :is="roleConfig[newMessageRole].icon"
+                  class="w-4 h-4"
+                />
+                <span class="text-xs font-medium">{{
+                  roleConfig[newMessageRole].label
+                }}</span>
+                <ChevronDown class="w-3 h-3 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuLabel>发送身份</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                v-for="(cfg, r) in roleConfig"
+                :key="r"
+                @click="newMessageRole = r as role"
+              >
+                <component :is="cfg.icon" class="mr-2 h-4 w-4" />
+                {{ cfg.label }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
+          <!-- 附件按钮 -->
           <input
             ref="fileInput"
             type="file"
@@ -198,69 +192,61 @@ defineExpose({
             class="hidden"
             @change="handleFileSelect"
           />
-          <TooltipProvider :delay-duration="200">
+          <TooltipProvider>
             <Tooltip>
               <TooltipTrigger as-child>
                 <Button
                   variant="ghost"
                   size="icon"
-                  class="h-8 w-8"
+                  class="h-8 w-8 text-muted-foreground"
                   @click="triggerFileInput"
                 >
-                  <Paperclip class="size-4" />
+                  <Paperclip class="w-4 h-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent><p>附加文件</p></TooltipContent>
+              <TooltipContent>上传文件</TooltipContent>
             </Tooltip>
           </TooltipProvider>
 
-          <!-- 角色/发送选项 -->
-          <Popover>
-            <PopoverTrigger as-child>
-              <Button variant="ghost" size="icon" class="h-8 w-8">
-                <component :is="roleIcons[newMessageRole]" class="size-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent class="w-auto p-4">
-              <div class="grid gap-4">
-                <div class="space-y-2">
-                  <h4 class="font-medium leading-none">发送选项</h4>
-                  <p class="text-sm text-muted-foreground">
-                    选择消息的角色或执行高级操作。
-                  </p>
-                </div>
-                <RadioGroup v-model="newMessageRole" default-value="user">
-                  <div class="flex items-center space-x-2">
-                    <RadioGroupItem id="r-user" value="user" />
-                    <Label for="r-user" class="flex items-center gap-2"
-                      ><User class="size-4" /> 用户</Label
-                    >
-                  </div>
-                  <div class="flex items-center space-x-2">
-                    <RadioGroupItem id="r-assistant" value="assistant" />
-                    <Label for="r-assistant" class="flex items-center gap-2"
-                      ><Bot class="size-4" /> 助手</Label
-                    >
-                  </div>
-                  <div class="flex items-center space-x-2">
-                    <RadioGroupItem id="r-system" value="system" />
-                    <Label for="r-system" class="flex items-center gap-2"
-                      ><Cog class="size-4" /> 系统</Label
-                    >
-                  </div>
-                </RadioGroup>
+          <!-- 润色按钮 -->
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger as-child>
                 <Button
-                  variant="secondary"
-                  :disabled="!canSend || disabled"
-                  @click="() => handleSend(true)"
+                  variant="ghost"
+                  size="icon"
+                  class="h-8 w-8 text-muted-foreground hover:text-purple-500"
+                  :disabled="!newMessage.trim()"
+                  @click="emit('polish', newMessage, newMessageRole)"
                 >
-                  <Sparkles class="mr-2 size-4" /> 发送并生成
+                  <Wand2 class="w-4 h-4" />
                 </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
+              </TooltipTrigger>
+              <TooltipContent>AI 润色</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
+
+        <!-- 右侧：发送按钮 -->
+        <Button
+          size="sm"
+          :disabled="!canSend"
+          class="h-8 rounded-lg gap-2 transition-all duration-200"
+          :class="newMessageRole === 'user' ? 'w-24' : 'w-auto px-3'"
+          @click="handleSend(false)"
+        >
+          <span v-if="newMessageRole === 'user'">发送</span>
+          <Send v-if="newMessageRole === 'user'" class="w-3.5 h-3.5" />
+          <span v-else>插入</span>
+          <Sparkles v-if="newMessageRole !== 'user'" class="w-3.5 h-3.5" />
+        </Button>
       </div>
+    </div>
+
+    <div class="text-center mt-2">
+      <span class="text-[10px] text-muted-foreground/40"
+        >Shift + Enter 换行</span
+      >
     </div>
   </div>
 </template>

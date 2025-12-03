@@ -3,49 +3,55 @@
 import { defineStore } from "pinia";
 import { ref, type Ref } from "vue";
 import Database from "@tauri-apps/plugin-sql";
-// 引入事件系统
-import { fsEmitter, FSEventType } from "../FileSystem/FileSystem.events";
+import {
+  fsEmitter,
+  FSEventType,
+} from "@/features/FileSystem/FileSystem.events";
 
 /**
- * @description
- * 负责管理文件系统元信息（Metadata）的 Pinia Store。
- * 使用 tauri-plugin-sql (SQLite) 作为后端，为每个文件路径提供一个持久化的键值存储。
- * 该 Store 通过监听文件系统事件自动维护元信息，不再与 FileSystemProxy 强耦合。
+ * Metadata Store
+ *
+ * 职责：
+ * 1. 维护文件/文件夹的附加属性（元数据），如：标签、备注、自定义排序等。
+ * 2. 监听 FileSystem 事件，自动同步元数据的路径变更（移动、重命名、删除）。
+ * 3. 使用 SQLite 持久化存储，与文件系统解耦，仅通过路径关联。
  */
 export const useMetadataStore = defineStore("metadata", () => {
-  // 数据库实例的引用
+  // --- State ---
   const db: Ref<Database | null> = ref(null);
-  // 初始化状态标志
   const isInitialized = ref(false);
 
-  /**
-   * @description 内部工具函数，确保数据库已连接。
-   * @throws 如果数据库未初始化，则抛出错误。
-   */
+  // --- Helpers ---
+
+  /** 确保数据库已连接，否则抛出异常 */
   const _assertDb = () => {
     if (!db.value) {
       throw new Error(
-        "[MetadataStore] Database not initialized. Please call init() first."
+        "[Metadata] Database not initialized. Call init() first."
       );
     }
   };
 
   /**
-   * @description 初始化 Metadata Store 并订阅文件系统事件。
-   * 连接到 SQLite 数据库并创建所需的表。
+   * 将路径标准化的辅助函数（可选）
+   * 如果文件系统保证路径格式统一（如无尾随斜杠），则不需要过多处理
+   */
+  const normalizePath = (p: string) => p;
+
+  // --- Actions: Core Logic ---
+
+  /**
+   * 初始化数据库并绑定 FS 事件监听
    */
   const init = async () => {
     if (isInitialized.value) return;
 
     try {
-      // 加载或创建名为 'metadata.db' 的数据库
-      // 路径相对于 AppData 目录
-      const database = await Database.load("sqlite:metadata.db");
-      db.value = database;
+      console.log("[Metadata] Initializing Database...");
+      // 加载 SQLite 数据库，位于 AppData 目录下
+      db.value = await Database.load("sqlite:metadata.db");
 
-      // 创建元信息表，如果它不存在的话
-      // path: 文件或文件夹的完整相对路径，作为主键
-      // meta: 存储为 JSON 字符串的元信息对象
+      // 建表：path 为主键 (TEXT), meta 为 JSON 字符串 (TEXT)
       await db.value.execute(`
         CREATE TABLE IF NOT EXISTS metadata (
           path TEXT PRIMARY KEY,
@@ -53,175 +59,171 @@ export const useMetadataStore = defineStore("metadata", () => {
         );
       `);
 
-      // --- 订阅文件系统事件 ---
-      // 文件/文件夹 重命名 -> rePath
-      fsEmitter.on(FSEventType.FILE_RENAMED, ({ oldPath, newPath }) =>
-        rePath(oldPath, newPath)
-      );
-      fsEmitter.on(FSEventType.DIR_RENAMED, ({ oldPath, newPath }) =>
-        rePath(oldPath, newPath)
-      );
+      // --- 绑定事件监听 ---
 
-      // 文件/文件夹 移动 -> rePath
-      fsEmitter.on(FSEventType.FILE_MOVED, ({ oldPath, newPath }) =>
-        rePath(oldPath, newPath)
-      );
-      fsEmitter.on(FSEventType.DIR_MOVED, ({ oldPath, newPath }) =>
-        rePath(oldPath, newPath)
-      );
+      // 1. 重命名 (文件 & 文件夹) -> 更新路径
+      const handleRename = ({
+        oldPath,
+        newPath,
+      }: {
+        oldPath: string;
+        newPath: string;
+      }) => {
+        rePath(oldPath, newPath);
+      };
+      fsEmitter.on(FSEventType.FILE_RENAMED, handleRename);
+      fsEmitter.on(FSEventType.DIR_RENAMED, handleRename);
 
-      // 文件夹 复制 -> copy
-      // 注意：单个文件复制通常不复制其元数据，除非有明确需求。
-      // 这里的 FSEventType.DIR_COPIED 对应 FS Proxy 中的 FOLDER 命令，需要复制结构元数据
-      fsEmitter.on(FSEventType.DIR_COPIED, ({ from, to }) => copy(from, to));
-      fsEmitter.on(FSEventType.FILE_COPIED, ({ from, to }) => copy(from, to));
+      // 2. 移动 (文件 & 文件夹) -> 更新路径 (逻辑同重命名)
+      const handleMove = ({
+        oldPath,
+        newPath,
+      }: {
+        oldPath: string;
+        newPath: string;
+      }) => {
+        rePath(oldPath, newPath);
+      };
+      fsEmitter.on(FSEventType.FILE_MOVED, handleMove);
+      fsEmitter.on(FSEventType.DIR_MOVED, handleMove);
 
-      // 文件/文件夹 删除 -> delete
-      fsEmitter.on(FSEventType.FILE_DELETED, ({ path }) => del(path));
-      fsEmitter.on(FSEventType.DIR_DELETED, ({ path }) => del(path));
+      // 3. 删除 (文件 & 文件夹) -> 删除元数据
+      const handleDelete = ({ path }: { path: string }) => {
+        del(path);
+      };
+      fsEmitter.on(FSEventType.FILE_DELETED, handleDelete);
+      fsEmitter.on(FSEventType.DIR_DELETED, handleDelete);
+
+      // 4. 复制 (文件 & 文件夹) -> 复制元数据
+      // 注意：给出的 FileSystem 实现中 VirtualFile.copyTo 目前只发射 FILE_CREATED，
+      // 没有发射 FILE_COPIED，因此单个文件复制可能无法自动触发元数据复制。
+      // VirtualFolder.copyTo 发射了 DIR_COPIED，可以正常工作。
+      const handleCopy = ({ from, to }: { from: string; to: string }) => {
+        copy(from, to);
+      };
+      fsEmitter.on(FSEventType.DIR_COPIED, handleCopy);
+      fsEmitter.on(FSEventType.FILE_COPIED, handleCopy);
 
       isInitialized.value = true;
-      console.log(
-        "[MetadataStore] Initialized successfully and listening to FS events."
-      );
+      console.log("[Metadata] Initialization Complete.");
     } catch (error) {
-      console.error("[MetadataStore] Failed to initialize:", error);
+      console.error("[Metadata] Failed to initialize:", error);
     }
   };
 
-  /**
-   * @description 检查指定路径是否存在元信息。
-   * @param path 要检查的文件或文件夹路径。
-   * @returns 如果存在元信息，则返回 true，否则返回 false。
-   */
+  // --- Actions: CRUD ---
+
+  /** 检查路径是否存在元数据 */
   const exists = async (path: string): Promise<boolean> => {
     _assertDb();
-    const result = await db.value!.select<[{ count: number }]>(
+    const res = await db.value!.select<[{ count: number }]>(
       "SELECT COUNT(1) as count FROM metadata WHERE path = $1",
-      [path]
+      [normalizePath(path)]
     );
-    return result[0].count > 0;
+    return res[0].count > 0;
   };
 
-  /**
-   * @description 读取指定路径的元信息。
-   * @param path 要读取元信息的文件或文件夹路径。
-   * @returns 解析后的元信息对象，如果不存在则返回 null。
-   */
+  /** 读取元数据 */
   const read = async <T extends object>(path: string): Promise<T | null> => {
     _assertDb();
-    const result = await db.value!.select<{ meta: string }[]>(
+    const res = await db.value!.select<{ meta: string }[]>(
       "SELECT meta FROM metadata WHERE path = $1",
-      [path]
+      [normalizePath(path)]
     );
-
-    if (result.length === 0) {
-      return null;
-    }
-
+    if (res.length === 0) return null;
     try {
-      return JSON.parse(result[0].meta) as T;
-    } catch (error) {
-      console.error(
-        `[MetadataStore] Failed to parse metadata for path '${path}':`,
-        error
-      );
+      return JSON.parse(res[0].meta) as T;
+    } catch (e) {
+      console.error(`[Metadata] JSON Parse error for ${path}`, e);
       return null;
     }
   };
 
-  /**
-   * @description 写入或更新指定路径的元信息。
-   * @param path 要写入元信息的文件或文件夹路径。
-   * @param meta 要存储的元信息对象。
-   */
+  /** 写入/更新元数据 (Upsert) */
   const write = async (path: string, meta: object): Promise<void> => {
     _assertDb();
-    const jsonMeta = JSON.stringify(meta);
-    // 'INSERT OR REPLACE' (UPSERT) 语义：如果路径已存在，则更新；否则，插入新行。
+    const jsonStr = JSON.stringify(meta);
     await db.value!.execute(
       "INSERT OR REPLACE INTO metadata (path, meta) VALUES ($1, $2)",
-      [path, jsonMeta]
+      [normalizePath(path), jsonStr]
     );
   };
 
-  /**
-   * @description 为指定路径创建元信息，是 write 的别名。
-   * @param path 要创建元信息的文件或文件夹路径。
-   * @param initialMeta 初始元信息对象。
-   */
-  const create = async (path: string, initialMeta: object): Promise<void> => {
-    return write(path, initialMeta);
-  };
-
-  /**
-   * @description 删除指定路径及其所有子路径的元信息。
-   * @param path 要删除元信息的文件或文件夹路径。
-   */
+  /** 删除元数据 (递归删除子路径) */
   const del = async (path: string): Promise<void> => {
-    if (!db.value) return; // 如果DB未连接（例如在初始化前收到事件），安全退出
-    // 删除条目本身以及所有以该路径为前缀的子条目（处理文件夹删除）
-    // 'path LIKE $2' where $2 is 'path/%'
-    await db.value!.execute(
+    // 即使未初始化完成收到事件也不报错，直接忽略即可
+    if (!db.value) return;
+
+    const target = normalizePath(path);
+    // 删除自身 OR 自身作为前缀的子路径 (target/...)
+    await db.value.execute(
       "DELETE FROM metadata WHERE path = $1 OR path LIKE $2",
-      [path, `${path}/%`]
+      [target, `${target}/%`]
     );
   };
 
+  // --- Actions: Internal Synchronization ---
+
   /**
-   * @description 核心维护函数：当文件或文件夹被移动或重命名时，更新其元信息路径。
-   * @param oldPath 原始路径。
-   * @param newPath 新路径。
+   * 路径变更同步 (Rename / Move)
+   * 将 oldPath 及其所有子路径的元数据记录更新为 newPath
    */
   const rePath = async (oldPath: string, newPath: string): Promise<void> => {
     if (!db.value) return;
+    const oldP = normalizePath(oldPath);
+    const newP = normalizePath(newPath);
 
-    // 1. 更新条目本身的路径
-    await db.value!.execute("UPDATE metadata SET path = $1 WHERE path = $2", [
-      newPath,
-      oldPath,
+    console.debug(`[Metadata] rePath: ${oldP} -> ${newP}`);
+
+    // 1. 更新节点本身
+    await db.value.execute("UPDATE metadata SET path = $1 WHERE path = $2", [
+      newP,
+      oldP,
     ]);
 
-    // 2. 查找并更新所有子路径
-    const children = await db.value!.select<{ path: string }[]>(
+    // 2. 查找所有子节点 (针对文件夹重命名/移动的情况)
+    const children = await db.value.select<{ path: string }[]>(
       "SELECT path FROM metadata WHERE path LIKE $1",
-      [`${oldPath}/%`]
+      [`${oldP}/%`]
     );
 
-    // 批量更新所有子条目
+    // 3. 逐个更新子节点路径
+    // 虽然 SQL replace 也可以，但在应用层处理路径替换更精确，防止部分匹配错误
     for (const child of children) {
-      const newChildPath = child.path.replace(oldPath, newPath);
-      await db.value!.execute("UPDATE metadata SET path = $1 WHERE path = $2", [
-        newChildPath,
+      // e.g. "folder/sub/file" replace "folder" -> "newFolder/sub/file"
+      const childNewPath = child.path.replace(oldP, newP);
+      await db.value.execute("UPDATE metadata SET path = $1 WHERE path = $2", [
+        childNewPath,
         child.path,
       ]);
     }
   };
 
   /**
-   * @description 核心维护函数：当文件或文件夹被复制时，为其创建新的元信息记录。
-   * @param sourcePath 源路径。
-   * @param destinationPath 目标路径。
+   * 复制同步 (Copy)
+   * 将 sourcePath 及其所有子路径的元数据 复制一份给 destinationPath
    */
   const copy = async (
     sourcePath: string,
     destinationPath: string
   ): Promise<void> => {
     if (!db.value) return;
+    const src = normalizePath(sourcePath);
+    const dest = normalizePath(destinationPath);
 
-    // 1. 查找源路径及其所有子路径的元信息
-    const entriesToCopy = await db.value!.select<
-      { path: string; meta: string }[]
-    >("SELECT path, meta FROM metadata WHERE path = $1 OR path LIKE $2", [
-      sourcePath,
-      `${sourcePath}/%`,
-    ]);
+    console.debug(`[Metadata] copy: ${src} -> ${dest}`);
 
-    // 2. 为每个找到的条目创建新的记录
-    for (const entry of entriesToCopy) {
-      const newEntryPath = entry.path.replace(sourcePath, destinationPath);
-      // 使用 INSERT OR REPLACE 来安全地写入，以防目标路径已存在元数据
-      await db.value!.execute(
+    // 查找源路径及其所有子路径
+    const entries = await db.value.select<{ path: string; meta: string }[]>(
+      "SELECT path, meta FROM metadata WHERE path = $1 OR path LIKE $2",
+      [src, `${src}/%`]
+    );
+
+    for (const entry of entries) {
+      // 计算新路径
+      const newEntryPath = entry.path.replace(src, dest);
+      // 插入新记录 (使用 INSERT OR REPLACE 防止冲突)
+      await db.value.execute(
         "INSERT OR REPLACE INTO metadata (path, meta) VALUES ($1, $2)",
         [newEntryPath, entry.meta]
       );
@@ -230,11 +232,12 @@ export const useMetadataStore = defineStore("metadata", () => {
 
   return {
     init,
+    isInitialized,
     exists,
-    create,
     read,
     write,
-    delete: del, // 使用 'del' 以避免与 JavaScript 关键字冲突，但在 FileSystemStore 中导出为 'delete'
+    delete: del, // 导出为 delete 方法
+    // 下面两个主要供调试或手动调用，正常情况下由事件自动触发
     rePath,
     copy,
   };

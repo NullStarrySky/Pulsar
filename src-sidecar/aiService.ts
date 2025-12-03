@@ -7,7 +7,8 @@ import * as path from "node:path";
 import { experimental_createMCPClient } from "@ai-sdk/mcp";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Tool } from "ai";
-import { hydrateModel, type ModelConfig } from "./model-hydration";
+import { hydrateModel } from "./model-hydration";
+import { ModelConfig } from "../src/schema/modelConfig/modelconfig.types";
 import { WebSocket } from "ws";
 
 // =================================================================================
@@ -48,7 +49,7 @@ type MCPClient = Awaited<ReturnType<typeof experimental_createMCPClient>>;
 export class AIService {
   private mcpClients = new Map<
     string,
-    { client: MCPClient; tools: Record<string, Tool> }
+    { client: MCPClient; tools: Record<string, any> }
   >();
   private allMcpTools: Tool[] = [];
   private mcpManifestPath: string = "manifest.json";
@@ -73,7 +74,7 @@ export class AIService {
 
     await this.initializeAllMcpClients();
     console.log(
-      `Loaded ${this.mcpClients.size} MCP servers with a total of ${this.allMcpTools.length} tools.`,
+      `Loaded ${this.mcpClients.size} MCP servers with a total of ${this.allMcpTools.length} tools.`
     );
   }
 
@@ -109,7 +110,7 @@ export class AIService {
                   JSON.stringify({
                     type: "remote-function-call",
                     payload: { callId, functionId, args },
-                  }),
+                  })
                 );
               });
             };
@@ -190,11 +191,11 @@ export class AIService {
                 args.model,
                 purpose,
                 this.modelConfig,
-                this.secrets,
+                this.secrets
               );
             } else {
               console.warn(
-                `Model string was passed for an API call ("${api}") with an undetermined purpose. The model was not hydrated.`,
+                `Model string was passed for an API call ("${api}") with an undetermined purpose. The model was not hydrated.`
               );
             }
           }
@@ -214,11 +215,7 @@ export class AIService {
             throw new Error(`API "${api}" not found in Vercel AI SDK.`);
           }
 
-          console.log(hydratedArgs);
           const response = await apiFunction(hydratedArgs);
-          console.log("afterGenerate");
-          console.log(response);
-          console.log(response.text);
 
           if (api.startsWith("stream")) {
             this.handleStreamResponse(response, requestId, ws);
@@ -229,7 +226,7 @@ export class AIService {
                 type: "result",
                 requestId,
                 payload: this.materializeResult(response),
-              }),
+              })
             );
           }
         } catch (e) {
@@ -238,7 +235,7 @@ export class AIService {
               type: "error",
               requestId,
               error: (e as Error).message,
-            }),
+            })
           );
         }
       },
@@ -319,7 +316,7 @@ export class AIService {
   private handleStreamResponse(
     response: any,
     requestId: string,
-    ws: WebSocket,
+    ws: WebSocket
   ) {
     ["text", "finishReason", "usage", "toolCalls", "toolResults"].forEach(
       (prop) => {
@@ -332,8 +329,8 @@ export class AIService {
                   type: "promise-result",
                   propertyKey: prop,
                   payload: value,
-                }),
-              ),
+                })
+              )
             )
             .catch((e: Error) =>
               ws.send(
@@ -341,11 +338,11 @@ export class AIService {
                   requestId,
                   type: "error",
                   error: e.message,
-                }),
-              ),
+                })
+              )
             );
         }
-      },
+      }
     );
 
     const streamKeys = ["textStream", "fullStream", "partialObjectStream"];
@@ -359,7 +356,7 @@ export class AIService {
                 streamKey,
                 type: "stream-chunk",
                 payload: chunk,
-              }),
+              })
             );
           }
           ws.send(JSON.stringify({ requestId, streamKey, type: "stream-end" }));
@@ -383,7 +380,7 @@ export class AIService {
   // 更新函数签名以使用新的联合类型
   public async addMcpServer(
     serverName: string,
-    config: McpServerConfig,
+    config: McpServerConfig
   ): Promise<void> {
     const manifest = await this.loadMcpManifest();
     manifest.mcpServers[serverName] = config;
@@ -404,13 +401,13 @@ export class AIService {
 
   private recalculateAllMcpTools(): void {
     this.allMcpTools = Array.from(this.mcpClients.values()).flatMap((server) =>
-      Object.values(server.tools),
+      Object.values(server.tools)
     );
   }
 
   private async addOrUpdateMcpServer(
     serverName: string,
-    config: McpServerConfig,
+    config: McpServerConfig
   ): Promise<void> {
     if (this.mcpClients.has(serverName)) {
       await this.removeMcpServer(serverName);
@@ -454,7 +451,9 @@ export class AIService {
     this.mcpClients.set(serverName, { client, tools: tools });
     this.recalculateAllMcpTools();
     console.log(
-      `MCP server "${serverName}" (type: ${serverType}) started with ${Object.keys(tools).length} tools.`,
+      `MCP server "${serverName}" (type: ${serverType}) started with ${
+        Object.keys(tools).length
+      } tools.`
     );
   }
 
@@ -471,7 +470,7 @@ export class AIService {
   private async initializeAllMcpClients(): Promise<void> {
     const manifest = await this.loadMcpManifest();
     for (const [serverName, config] of Object.entries(
-      manifest.mcpServers || {},
+      manifest.mcpServers || {}
     )) {
       try {
         await this.addOrUpdateMcpServer(serverName, config);
@@ -508,7 +507,7 @@ export class AIService {
     await fs.writeFile(
       this.mcpManifestPath,
       JSON.stringify(manifest, null, 2),
-      "utf-8",
+      "utf-8"
     );
   }
 }

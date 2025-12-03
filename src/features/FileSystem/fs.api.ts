@@ -24,6 +24,7 @@ import { type as getOsType } from "@tauri-apps/plugin-os";
 
 // 2. 平台检测与路径处理辅助函数
 
+// type OsType = 'linux' | 'windows' | 'macos' | 'ios' | 'android';
 // 获取当前操作系统类型，这是一个同步操作
 const osType = getOsType();
 

@@ -9,6 +9,7 @@ lerna-debug.log*
 
 src-tauri/binaries
 src-tauri/target
+Todo.todo
 node_modules
 dist
 dist-ssr

@@ -2,10 +2,9 @@
 <script setup lang="ts">
 import LeftSidebar from "./LeftSidebar.vue";
 import FileSidebar from "./FileSidebar.vue";
-import RightSidebar from "@/components/layout/RightSidebar.vue";
 import BottomBar from "@/components/layout/BottomBar.vue";
 import Workbench from "./workbench/Workbench.vue";
-import { Files, Settings, User } from "lucide-vue-next";
+import { Files, PlugIcon, Settings, User } from "lucide-vue-next";
 import { useProcessManagerStore } from "@/features/ProcessManager/ProcessManager.store";
 import { onMounted } from "vue";
 
@@ -17,12 +16,17 @@ onMounted(() => {
 
 // 左侧栏配置
 const topButtons = [
-  { svg: User, onClick: "character", title: "Character" },
+  { svg: User, onClick: "$character", title: "Character" },
   { svg: Files, onClick: "file-browser", title: "Files" },
 ];
 
 const bottomButtons = [
-  { svg: Settings, onClick: "setting", title: "Settings" },
+  {
+    svg: PlugIcon,
+    onClick: "modelConfig.[modelConfig].json",
+    title: "Model Config",
+  },
+  { svg: Settings, onClick: "setting.[setting].json", title: "Settings" },
 ];
 </script>
 
@@ -40,9 +44,6 @@ const bottomButtons = [
 
       <!-- 主工作台 (编辑器区域) -->
       <Workbench class="flex-1 min-w-0" />
-
-      <!-- 右侧栏 (进程管理等) -->
-      <RightSidebar />
     </div>
 
     <!-- 底部状态栏 -->

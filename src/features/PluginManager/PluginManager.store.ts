@@ -105,31 +105,32 @@ export const usePluginStore = defineStore("plugin", () => {
   /**
    * 根据文件夹名称获取插件信息和可加载的 URL
    */
-  const loadPluginByName = (dirName: string) => {
-    const manifest = plugins.value.get(dirName);
-    if (!manifest) {
-      throw new Error(`Plugin '${dirName}' not found.`);
-    }
+  // const loadPluginByName = (dirName: string) => {
+  //   const manifest = plugins.value.get(dirName);
+  //   if (!manifest) {
+  //     throw new Error(`Plugin '${dirName}' not found.`);
+  //   }
 
-    const pluginDir = urlJoin("plugin", dirName);
+  //   const pluginDir = urlJoin("plugin", dirName);
 
-    // 使用 fsStore 提供的能力转换路径
-    let jsUrl: string | null = null;
-    if (manifest.js) {
-      jsUrl = fsStore.convertFileSrc(urlJoin(pluginDir, manifest.js));
-    }
+  //   // 使用 fsStore 提供的能力转换路径
+  //   let jsUrl: string | null = null;
+  //   if (manifest.js) {
 
-    let cssUrl: string | null = null;
-    if (manifest.css) {
-      cssUrl = fsStore.convertFileSrc(urlJoin(pluginDir, manifest.css));
-    }
+  //     jsUrl = fsStore.convert(urlJoin(pluginDir, manifest.js));
+  //   }
 
-    return {
-      manifest,
-      jsUrl,
-      cssUrl,
-    };
-  };
+  //   let cssUrl: string | null = null;
+  //   if (manifest.css) {
+  //     cssUrl = fsStore.convertFileSrc(urlJoin(pluginDir, manifest.css));
+  //   }
+
+  //   return {
+  //     manifest,
+  //     jsUrl,
+  //     cssUrl,
+  //   };
+  // };
 
   /**
    * 创建一个新的插件文件夹模版
@@ -175,7 +176,7 @@ export const usePluginStore = defineStore("plugin", () => {
   return {
     plugins,
     loadPluginManifests,
-    loadPluginByName,
+    // loadPluginByName,
     createPluginFolder,
   };
 });

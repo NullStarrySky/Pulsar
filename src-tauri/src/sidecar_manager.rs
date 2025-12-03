@@ -8,6 +8,7 @@ use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Mutex;
+use tokio::sync::oneshot; // 引入 one-shot channel，用于一次性信令
 
 /// 定义用于管理 Sidecar 进程状态的结构体。
 /// 这与您在 main.rs 中初始化的方式相匹配。
@@ -30,8 +31,13 @@ pub async fn initialize_sidecar(
 
     println!("Initializing sidecar process...");
 
+    // 创建一个一次性通道，用于在 sidecar 启动并输出 stdout 后发出信号
+    let (tx, rx) = oneshot::channel::<()>();
+    // 将 sender 包装起来，以便在异步任务中安全地、一次性地使用它
+    let sender = Mutex::new(Some(tx));
+
     // 启动 sidecar 进程。 "app" 与您原始 TS 代码中的名称匹配。
-    let (mut rx, child) = app
+    let (mut event_rx, child) = app
         .shell()
         .sidecar("app")
         .expect("Failed to create sidecar command")
@@ -46,9 +52,19 @@ pub async fn initialize_sidecar(
 
     // 异步任务：监听 sidecar 的输出并通过事件发送到前端
     tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
+        while let Some(event) = event_rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
+                    // 锁定 sender 以安全地访问它
+                    let mut sender_guard = sender.lock().await;
+                    // take() 会取出 Some(tx) 并留下 None，确保信号只被发送一次
+                    if let Some(tx) = sender_guard.take() {
+                        println!("Sidecar sent first stdout, signaling ready state.");
+                        // 发送信号，通知主任务 sidecar 已准备就绪
+                        // .ok() 会忽略接收端可能已关闭的错误
+                        let _ = tx.send(());
+                    }
+
                     let line_str = String::from_utf8_lossy(&line).to_string();
                     println!("[Sidecar STDOUT]: {}", line_str);
                     app_handle_clone
@@ -81,8 +97,23 @@ pub async fn initialize_sidecar(
         }
     });
 
-    // 等待一小段时间，确保 sidecar 内的 HTTP 服务器已启动
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // 等待来自 sidecar 的 stdout 信号，并设置一个15秒的超时
+    println!("Waiting for sidecar to be ready...");
+    match tokio::time::timeout(Duration::from_secs(15), rx).await {
+        Ok(Ok(_)) => {
+            println!("Sidecar is ready. Proceeding to send init data.");
+        }
+        Ok(Err(_)) => {
+            // 如果 sender 在发送前被销毁，会发生这个错误
+            return Err("Failed to receive ready signal from sidecar: channel closed.".to_string());
+        }
+        Err(_) => {
+            // 超时错误
+            return Err("Timed out waiting for sidecar to start. It may have failed or is not producing any output.".to_string());
+        }
+    }
+
+    // --- Sidecar 准备就绪后，继续执行以下逻辑 ---
 
     let data_dir = app
         .path()

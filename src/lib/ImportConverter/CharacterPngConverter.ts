@@ -1,3 +1,4 @@
+// src/lib/ImportConverter/CharacterPngConverter.ts
 // // src/lib/ImportConverter/CharacterPngConverter.ts
 // // sillyTavernpngConverter.ts
 

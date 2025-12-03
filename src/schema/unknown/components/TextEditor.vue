@@ -1,7 +1,6 @@
 <!-- src/schema/unknown/components/TextEditor.vue -->
 <script setup lang="ts">
-// 1. 从 vue 引入 Ref 类型，用于类型断言
-import { onUnmounted, shallowRef, computed, type Ref } from "vue";
+import { shallowRef, computed, type Ref } from "vue";
 import { useFileContent } from "@/features/FileSystem/composables/useFileContent.ts";
 import MonacoEditor from "@/components/MonacoEditor.vue";
 import type { editor } from "monaco-editor";
@@ -52,7 +51,7 @@ const props = defineProps<{
   path: string;
 }>();
 
-const { content, sync } = useFileContent<string | object>(props.path);
+const content = useFileContent<string | object>(props.path);
 
 // --- 核心修改：在 set 函数中断言 content 类型 ---
 const editorContent = computed<string>({
@@ -98,10 +97,6 @@ const handleEditorDidMount = (editorInstance: editor.IStandaloneCodeEditor) => {
   editorRef.value = editorInstance;
   editorRef.value.focus();
 };
-
-onUnmounted(() => {
-  sync.cancel();
-});
 </script>
 
 <template>

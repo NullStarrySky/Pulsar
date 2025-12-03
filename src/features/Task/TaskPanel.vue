@@ -9,14 +9,14 @@
         <h2
           class="font-semibold text-sm uppercase tracking-wide text-foreground"
         >
-          Tasks
+          任务
         </h2>
         <Badge
           v-if="store.runningCount > 0"
           variant="secondary"
           class="px-1.5 py-0 h-5 text-[10px] font-mono"
         >
-          {{ store.runningCount }} running
+          {{ store.runningCount }} 正在执行
         </Badge>
       </div>
 
@@ -27,7 +27,7 @@
         @click="store.clearCompleted"
         title="Clear finished tasks"
       >
-        <span class="mr-1.5">Clear Done</span>
+        <span class="mr-1.5">清除已完成任务</span>
         <ListChecks class="w-3.5 h-3.5" />
       </Button>
     </div>
@@ -39,7 +39,7 @@
           v-if="store.tasks.length === 0"
           class="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm italic"
         >
-          No active tasks
+          没有激活的任务
         </div>
 
         <transition-group name="list">

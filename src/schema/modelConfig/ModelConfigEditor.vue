@@ -67,17 +67,14 @@
       </div>
 
       <div v-else class="max-w-4xl mx-auto space-y-8">
-        <!-- Header & Renaming -->
         <div class="group flex items-start justify-between">
           <div class="grow">
-            <!-- Built-in Provider Title -->
             <div v-if="selectedProviderData.builtIn">
               <Label class="text-sm text-muted-foreground">提供商 ID</Label>
               <h1 class="text-3xl font-bold capitalize">
                 {{ selectedProviderKey }}
               </h1>
             </div>
-            <!-- Custom Provider Title (with edit-on-hover) -->
             <div v-else>
               <Label
                 for="provider-key-input"
@@ -133,9 +130,7 @@
           <div class="space-y-4 max-w-lg">
             <div class="flex flex-col space-y-2">
               <div class="flex items-center justify-between">
-                <Label for="api-key-name-input"
-                  >API 密钥名称 (apiKeyName)</Label
-                >
+                <Label for="api-key-name-input">API 密钥名称</Label>
                 <Badge :variant="keyIsAvailable ? 'secondary' : 'outline'">
                   {{ keyIsAvailable ? "密钥已设置" : "密钥未设置" }}
                 </Badge>
@@ -177,11 +172,20 @@
               class="flex flex-col space-y-2"
             >
               <Label for="api-url-input">API 端点 (url, 可选)</Label>
-              <Input
-                id="api-url-input"
-                v-model="selectedProviderData.url"
-                placeholder="例如 https://api.openai.com/v1"
-              />
+              <div class="flex gap-2">
+                <Input
+                  id="api-url-input"
+                  v-model="selectedProviderData.url"
+                  placeholder="例如 https://api.openai.com/v1"
+                />
+                <Button
+                  @click="fetchModelsFromEndpoint"
+                  :disabled="!selectedProviderData.url || isFetchingModels"
+                  variant="outline"
+                >
+                  {{ isFetchingModels ? "获取中..." : "获取模型" }}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -209,7 +213,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onUnmounted, computed, nextTick } from "vue";
+import { ref, watch, computed, nextTick } from "vue";
 import { useFileContent } from "@/features/FileSystem/composables/useFileContent";
 import type {
   ModelConfig,
@@ -219,6 +223,7 @@ import type {
 } from "./modelConfig.types";
 import { useSecretsStore } from "@/features/Secrets/Secrets.store";
 import { Pencil, Trash2 } from "lucide-vue-next";
+import { push } from "notivue";
 
 // --- 子组件和UI组件导入 ---
 import ProviderModelsTable from "./components/ProviderModelsTable.vue";
@@ -236,10 +241,7 @@ const props = defineProps<{
 }>();
 
 // --- 2. 文件内容管理 ---
-const { content: remoteContent, sync } = useFileContent<ModelConfig>(
-  props.path
-);
-const localContent = ref<ModelConfig | null>(null);
+const localContent = useFileContent<ModelConfig>(props.path);
 
 const keyStore = useSecretsStore();
 // --- 3. UI 状态管理 ---
@@ -249,6 +251,7 @@ const providerKeyInputRef = ref<HTMLInputElement | null>(null);
 const apiKeyInputValue = ref("");
 const keyStatusMap = ref<Record<string, boolean>>({});
 const isEditingTitle = ref(false);
+const isFetchingModels = ref(false);
 
 const selectedProviderData = computed<ProviderData | null>({
   get() {
@@ -317,6 +320,64 @@ async function handleWriteKey() {
     await checkKeyStatus();
   } catch (error) {
     console.error("Failed to write secret key:", error);
+  }
+}
+
+// [ADDED] Function to fetch and merge models
+async function fetchModelsFromEndpoint() {
+  if (
+    !selectedProviderData.value?.url ||
+    !localContent.value ||
+    !selectedProviderKey.value
+  )
+    return;
+
+  isFetchingModels.value = true;
+  const endpoint = selectedProviderData.value.url.trim().replace(/\/$/, "");
+  const fetchUrl = `${endpoint}/models`;
+
+  try {
+    const response = await fetch(fetchUrl);
+    if (!response.ok) {
+      throw new Error(`请求失败，状态码: ${response.status}`);
+    }
+    const result = await response.json();
+
+    if (!result.data || !Array.isArray(result.data)) {
+      throw new Error("API 响应格式无效，缺少 'data' 数组。");
+    }
+
+    const fetchedModelIds: string[] = result.data.map((item: any) => item.id);
+    const providerData = localContent.value[selectedProviderKey.value];
+    const existingChatModels = new Set(
+      providerData.models.chat.map((m) => m.name)
+    );
+    let addedCount = 0;
+
+    fetchedModelIds.forEach((modelId) => {
+      if (!existingChatModels.has(modelId)) {
+        // By default, add new models to the 'chat' category
+        providerData.models.chat.push({
+          name: modelId,
+          enabled: true, // Default to enabled
+          capabilities: [],
+        });
+        addedCount++;
+      }
+    });
+
+    push.success({
+      title: "获取成功",
+      message: `已合并 ${addedCount} 个新模型。`,
+    });
+  } catch (error) {
+    console.error("获取模型列表失败:", error);
+    push.error({
+      title: "获取失败",
+      message: (error as Error).message || "发生未知网络错误。",
+    });
+  } finally {
+    isFetchingModels.value = false;
   }
 }
 
@@ -480,56 +541,5 @@ watch(selectedProviderKey, (newKey) => {
     apiKeyInputValue.value = "";
     checkKeyStatus();
   }
-});
-
-watch(
-  localContent,
-  (newContent, oldContent) => {
-    if (
-      newContent &&
-      JSON.stringify(newContent) !== JSON.stringify(oldContent)
-    ) {
-      sync(newContent);
-    }
-  },
-  { deep: true }
-);
-
-watch(
-  remoteContent,
-  (newRemoteContent) => {
-    if (
-      JSON.stringify(newRemoteContent) !== JSON.stringify(localContent.value)
-    ) {
-      localContent.value = newRemoteContent
-        ? JSON.parse(JSON.stringify(newRemoteContent))
-        : null;
-      if (localContent.value) {
-        const allKeyNames = Object.values(localContent.value)
-          .map((p) => p.apiKeyName)
-          .filter(Boolean);
-        Promise.all(
-          allKeyNames.map(async (keyName) => {
-            keyStatusMap.value[keyName] = await keyStore.isKeyAvailable(
-              keyName
-            );
-          })
-        );
-      }
-      if (
-        localContent.value &&
-        (!selectedProviderKey.value ||
-          !localContent.value[selectedProviderKey.value])
-      ) {
-        const keys = Object.keys(localContent.value);
-        selectedProviderKey.value = keys.length > 0 ? keys[0] : null;
-      }
-    }
-  },
-  { immediate: true }
-);
-
-onUnmounted(() => {
-  sync.cancel();
 });
 </script>

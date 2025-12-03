@@ -1,16 +1,14 @@
-<!-- src/schema/manifest/ManifestPanel.vue -->
 <script setup lang="ts">
 import { computed } from "vue";
 import {
   useFileSystemStore,
-  FileNode,
+  VirtualFolder,
+  VirtualFile,
 } from "@/features/FileSystem/FileSystem.store";
 import { useUIStore } from "@/features/UI/UI.store";
-import { useResources } from "@/schema/manifest/composables/useResources";
-import { writeTextFile } from "@/features/FileSystem/fs.api";
-import { BaseDirectory } from "@tauri-apps/plugin-fs";
+import { newManifest } from "@/schema/manifest/manifest";
 import ManifestEditor from "./ManifestEditor.vue";
-import { FileWarning, Plus, Settings2 } from "lucide-vue-next";
+import { FileWarning, Wand2 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 
 const props = defineProps<{ activeFilePath?: string | null }>();
@@ -18,170 +16,105 @@ const props = defineProps<{ activeFilePath?: string | null }>();
 const fsStore = useFileSystemStore();
 const uiStore = useUIStore();
 
-// --- 核心路径解析逻辑 ---
+// --- 1. 确定目标目录 ---
 const targetDirectory = computed(() => {
-  // 1. 优先检查 uiStore 中是否有明确的被选中角色 (CharacterLibrary 上下文)
+  // A. 优先 UI 选中的角色文件夹
   if (uiStore.uiState.activeCharacter) {
     const charPath = `character/${uiStore.uiState.activeCharacter}`;
-    // 简单校验该路径是否存在
-    if (fsStore.getNodeByPath(fsStore.fileStructure, charPath)) {
-      return charPath;
-    }
+    const node = fsStore.resolvePath(charPath);
+    if (node instanceof VirtualFolder) return charPath;
   }
 
-  // 2. 降级逻辑：检查传入的 props 或 uiStore 的 activeFile
+  // B. 降级：当前选中的文件所在的目录
   const rawPath = props.activeFilePath ?? uiStore.uiState.activeFile;
   if (!rawPath) return null;
 
-  const node = fsStore.getNodeByPath(fsStore.fileStructure, rawPath);
-  const isFile =
-    node instanceof FileNode ||
-    (typeof rawPath === "string" && rawPath.includes("."));
-
-  if (isFile) {
-    const parts = rawPath.split("/");
-    parts.pop();
-    return parts.join("/") || null;
+  const node = fsStore.resolvePath(rawPath);
+  if (node instanceof VirtualFile && node.parent) {
+    return node.parent.path;
   }
-  return rawPath;
+  if (node instanceof VirtualFolder) {
+    return node.path;
+  }
+  return null;
 });
 
+// --- 2. 预测 Manifest 路径 ---
 const potentialManifestPath = computed(() => {
-  if (!targetDirectory.value) return null;
-  const prefix = targetDirectory.value ? `${targetDirectory.value}/` : "";
-  return `${prefix}manifest.[manifest].json`;
+  const dir = targetDirectory.value;
+  if (!dir) return null;
+  return `${dir}/manifest.[manifest].json`;
 });
 
-const existingManifestPath = computed(() => {
-  const path = potentialManifestPath.value;
-  if (!path) return null;
-  return fsStore.getNodeByPath(fsStore.fileStructure, path) ? path : null;
+// --- 3. 检查文件是否存在 ---
+const manifestExists = computed(() => {
+  if (!potentialManifestPath.value) return false;
+  const node = fsStore.resolvePath(potentialManifestPath.value);
+  return node instanceof VirtualFile;
 });
 
-const {
-  manifestPath,
-  manifestContent,
-  toggleSelection,
-  inlineResources: inlinePaths,
-} = useResources(existingManifestPath);
-
-// --- 动作 ---
-const syncManifest = async (newContent: any) => {
-  if (!manifestPath.value) return;
-  try {
-    await writeTextFile(
-      manifestPath.value,
-      JSON.stringify(newContent, null, 2),
-      { baseDir: BaseDirectory.AppData }
-    );
-  } catch (e) {
-    console.error("Failed to sync manifest:", e);
-  }
-};
-
+// --- Actions ---
 const createManifest = async () => {
-  const path = potentialManifestPath.value;
-  if (!path) return;
+  const dirPath = targetDirectory.value;
+  if (!dirPath) return;
 
-  const defaultManifest = {
-    name: targetDirectory.value?.split("/").pop() || "New Manifest",
-    selection: { character: [], lorebook: [], preset: [] },
-    customComponents: {},
-  };
+  const dirNode = fsStore.resolvePath(dirPath);
+  if (!(dirNode instanceof VirtualFolder)) return;
+
+  const initialContent = newManifest();
+  initialContent.name = dirNode.name || "New Environment";
 
   try {
-    await writeTextFile(path, JSON.stringify(defaultManifest, null, 2), {
-      baseDir: BaseDirectory.AppData,
-    });
-    setTimeout(() => fsStore.refresh(), 500);
+    await dirNode.createFile("manifest.[manifest].json", initialContent);
   } catch (e) {
-    console.error("Failed to create manifest:", e);
+    console.error("Failed to create manifest", e);
   }
 };
-
-const allResources = computed(() => {
-  return { character: [], lorebook: [], preset: [] };
-});
 </script>
 
 <template>
-  <div class="h-full w-full flex flex-col bg-background">
-    <!-- Header -->
-    <div class="px-4 py-3 border-b border-border shrink-0 space-y-3">
-      <div class="flex items-center gap-2 text-foreground">
-        <Settings2 class="w-4 h-4" />
-        <h2 class="font-semibold text-sm tracking-tight">
-          {{
-            uiStore.uiState.activeCharacter
-              ? `${uiStore.uiState.activeCharacter} 的环境`
-              : "环境控制"
-          }}
-        </h2>
+  <div
+    class="h-full w-full flex flex-col bg-background border-l border-border/50"
+  >
+    <!-- Empty State -->
+    <div
+      v-if="!manifestExists"
+      class="flex-1 flex flex-col items-center justify-center p-8 text-center animate-in fade-in zoom-in-95"
+    >
+      <div
+        class="w-16 h-16 bg-muted/50 rounded-full flex items-center justify-center mb-6 shadow-inner"
+      >
+        <FileWarning class="w-8 h-8 text-muted-foreground/50" />
       </div>
 
-      <!-- 路径展示区域 -->
-      <div
-        class="bg-muted/50 rounded-md border border-border/50 p-2 space-y-1"
-        v-if="targetDirectory"
-      >
-        <p
-          class="text-[10px] uppercase text-muted-foreground font-bold tracking-wider"
-        >
-          {{ manifestPath ? "Configuration Source" : "Target Directory" }}
-        </p>
-        <p class="text-xs font-mono text-foreground break-all leading-tight">
-          {{ manifestPath || targetDirectory }}
-        </p>
+      <h3 class="text-base font-semibold text-foreground mb-2">
+        未检测到环境配置
+      </h3>
+
+      <div class="text-xs text-muted-foreground mb-8 max-w-60 leading-relaxed">
+        <span v-if="targetDirectory">
+          目录
+          <span class="font-mono text-foreground bg-muted px-1 rounded">{{
+            targetDirectory
+          }}</span>
+          下没有 manifest 文件。
+        </span>
+        <span v-else> 请先在左侧文件树中选择一个角色文件夹或任意文件。 </span>
       </div>
+
+      <Button
+        v-if="targetDirectory"
+        @click="createManifest"
+        class="gap-2 shadow-lg hover:shadow-xl transition-all"
+      >
+        <Wand2 class="w-4 h-4" />
+        初始化环境配置
+      </Button>
     </div>
 
-    <!-- Content Area -->
-    <div class="flex-1 overflow-hidden flex flex-col relative">
-      <!-- Case 1: 没有找到 Manifest 文件 (空状态) -->
-      <div
-        v-if="!manifestPath"
-        class="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in-95 duration-300"
-      >
-        <div
-          class="w-12 h-12 bg-muted rounded-full flex items-center justify-center mb-4"
-        >
-          <FileWarning class="w-6 h-6 text-muted-foreground" />
-        </div>
-
-        <h3 class="text-sm font-medium text-foreground mb-1">未找到环境配置</h3>
-
-        <p
-          class="text-xs text-muted-foreground max-w-[200px] mb-6 leading-relaxed"
-        >
-          {{
-            targetDirectory
-              ? `当前目录没有检测到 manifest 配置文件。`
-              : "请先在库中选择一个角色或目录。"
-          }}
-        </p>
-
-        <Button
-          v-if="potentialManifestPath"
-          variant="outline"
-          size="sm"
-          class="gap-2 border-dashed border-border hover:border-primary/50 hover:bg-muted"
-          @click="createManifest"
-        >
-          <Plus class="w-3.5 h-3.5" />
-          初始化配置
-        </Button>
-      </div>
-
-      <!-- Case 2: 编辑器 -->
-      <div v-else-if="manifestContent" class="flex-1 overflow-y-auto">
-        <ManifestEditor
-          :manifest="manifestContent"
-          :inline-resources="inlinePaths"
-          :all-resources="allResources"
-          @toggle="toggleSelection"
-          @update="syncManifest"
-        />
-      </div>
+    <!-- Editor State -->
+    <div v-else-if="potentialManifestPath" class="flex-1 flex flex-col min-h-0">
+      <ManifestEditor :path="potentialManifestPath" />
     </div>
   </div>
 </template>

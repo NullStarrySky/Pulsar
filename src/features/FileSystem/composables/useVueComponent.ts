@@ -6,163 +6,127 @@ import {
   type Ref,
   type Component,
   type ComputedRef,
+  shallowRef,
+  watch,
 } from "vue";
 import { loadModule } from "vue3-sfc-loader";
-import { useFileSystemStore } from "../FileSystem.store";
-import { FileNode } from "../FileSystem.store";
+import { useFileSystemStore, VirtualFile } from "../FileSystem.store";
 
-// 1. 全局组件缓存
-// 创建一个 Map 来缓存已加载和解析的组件，避免重复工作。
+// 缓存已编译的组件，避免重复编译
 const componentCache = new Map<string, Component>();
 
-// 2. 配置 vue3-sfc-loader
-// 这些选项是单例的，只需在应用生命周期内配置一次。
-
-// @ts-ignore - 因为 Tauri 的 API 是在运行时通过 withGlobalTauri 注入的
-const tauri = window.__TAURI__;
+// 获取全局 Tauri 对象 (适配 Tauri v1 或手动暴露的 v2 globals)
+// 如果使用 Tauri v2 且未开启全局变量，此处需要修改为具体 import 映射
+// @ts-ignore
+const tauri = window.__TAURI__ || {};
 
 const options = {
   /**
-   * @description 模块缓存和依赖重定向。
-   * 这是最关键的部分，它告诉 loader 如何处理 .vue 文件中的 import 语句。
+   * 模块依赖重定向
+   * 定义 .vue 文件中可以 import 的模块
    */
   moduleCache: {
-    // 将 'import { ... } from "vue"' 重定向到全局的 Vue 实例。
-    // 这对于在 Vite 中外部化 'vue' 的项目至关重要。
     vue: import("vue"),
-
-    // 将 Tauri API 的导入重定向到全局的 __TAURI__ 对象。
-    // 注意：您需要为您动态组件中用到的所有 Tauri 模块添加映射。
-    // 核心 API 模块
-    "@tauri-apps/api/path": tauri.path,
-    "@tauri-apps/api/event": tauri.event,
-    "@tauri-apps/api/window": tauri.window,
-    "@tauri-apps/api/webview": tauri.webview,
+    // 映射 Tauri API，确保动态组件可以使用系统能力
     "@tauri-apps/api/core": tauri.core,
-
-    // START: 根据 package.json 添加的 Tauri 插件
-    "@tauri-apps/plugin-autostart": tauri.autostart,
-    "@tauri-apps/plugin-clipboard-manager": tauri.clipboardManager,
-    "@tauri-apps/plugin-dialog": tauri.dialog,
     "@tauri-apps/plugin-fs": tauri.fs,
-    "@tauri-apps/plugin-http": tauri.http,
-    "@tauri-apps/plugin-notification": tauri.notification,
-    "@tauri-apps/plugin-opener": tauri.opener,
-    "@tauri-apps/plugin-os": tauri.os,
-    "@tauri-apps/plugin-positioner": tauri.positioner,
-    "@tauri-apps/plugin-process": tauri.process,
-    "@tauri-apps/plugin-shell": tauri.shell,
-    "@tauri-apps/plugin-sql": tauri.sql,
-    "@tauri-apps/plugin-store": tauri.store,
-    "@tauri-apps/plugin-upload": tauri.upload,
-    "@tauri-apps/plugin-websocket": tauri.websocket,
-
-    // 如果您的动态组件还导入了其他库（例如 lodash-es），您也需要在这里添加映射：
+    "@tauri-apps/plugin-dialog": tauri.dialog,
+    // 根据需要添加更多插件映射...
     // 'lodash-es': import('lodash-es'),
   },
 
   /**
-   * @description 自定义文件获取逻辑。
-   * 我们将默认的 fetch 替换为从我们的 VFS (Pinia store) 中读取文件。
+   * 自定义文件获取逻辑 - 适配新的 Virtual FS
    */
   async getFile(url: string) {
     const store = useFileSystemStore();
 
-    // 使用 getNodeByPath 直接访问 KV 结构，避免不必要的 proxy 循环。
-    const node = store.getNodeByPath(store.fileStructure, url);
+    // 1. 解析路径
+    const node = store.resolvePath(url);
 
-    if (node === undefined || !(node instanceof FileNode)) {
+    // 2. 校验节点
+    if (!node || !(node instanceof VirtualFile)) {
       throw new Error(
-        `[useVueComponent] Vue file not found or is a directory: ${url}`
+        `[useVueComponent] File not found or is directory: ${url}`
       );
     }
 
-    let content = node.content;
+    // 3. 获取内容 (优先读缓存，无缓存则通过 fs api 读取)
+    let content = await node.read();
 
-    // 如果文件内容尚未加载，则从磁盘加载它。
-    if (content === null) {
-      await store.load(url);
-      const updatedNode = store.getNodeByPath(store.fileStructure, url);
-      content = updatedNode instanceof FileNode ? updatedNode.content : null;
-    }
-
-    // 确保内容是字符串形式。
+    // 4. 类型安全检查 (SFC Loader 需要字符串)
     if (typeof content !== "string") {
-      console.error(
-        `[useVueComponent] Content of ${url} is not a string.`,
-        content
-      );
-      throw new Error(
-        `[useVueComponent] Failed to load content for ${url} as a string.`
-      );
+      // 尝试自动转换
+      if (typeof content === "object") {
+        content = JSON.stringify(content);
+      } else if (content instanceof Uint8Array) {
+        content = new TextDecoder().decode(content);
+      } else {
+        throw new Error(`[useVueComponent] Content of ${url} is not text.`);
+      }
     }
 
     return {
       getContentData: (asBinary: boolean) =>
         asBinary
-          ? Promise.reject("Binary content not supported")
+          ? Promise.reject("Binary content not supported in SFC loader")
           : Promise.resolve(content),
     };
   },
 
-  /**
-   * @description 样式注入逻辑。
-   * 将 .vue 文件中的 <style> 内容动态添加到文档头部。
-   */
   addStyle(textContent: string) {
-    const style = Object.assign(document.createElement("style"), {
-      textContent,
-    });
+    const style = document.createElement("style");
+    style.textContent = textContent;
     const ref = document.head.getElementsByTagName("style")[0] || null;
     document.head.insertBefore(style, ref);
   },
 
-  /**
-   * @description 错误和日志处理
-   */
   log(type: string, ...args: any[]) {
-    console.log(`[vue3-sfc-loader] ${type}`, ...args);
+    // 仅在开发模式下输出详细日志
+    if (process.env.NODE_ENV === "development") {
+      console.log(`[vue3-sfc-loader] ${type}`, ...args);
+    }
   },
 };
 
 /**
- * @description 从 VFS 中动态加载、解析和缓存 .vue 文件作为 Vue 组件。
- * @param path - .vue 文件的路径，可以是 ref、字符串或 null。
- * @returns 一个计算属性，其值为一个异步 Vue 组件实例或 null。
+ * 动态加载 Vue 组件
+ * @param path - .vue 文件的路径
  */
 export function useVueComponent(
   path: Ref<string | null> | string | null
 ): ComputedRef<Component | null> {
-  return computed(() => {
-    const currentPath = unref(path);
+  // 使用 shallowRef 缓存生成的异步组件定义
+  const asyncComp = shallowRef<Component | null>(null);
 
-    // 如果路径无效，则返回 null。
-    if (!currentPath || !currentPath.endsWith(".vue")) {
-      return null;
-    }
+  watch(
+    () => unref(path),
+    (currentPath) => {
+      if (!currentPath || !currentPath.endsWith(".vue")) {
+        asyncComp.value = null;
+        return;
+      }
 
-    // 步骤 1: 检查缓存
-    if (componentCache.has(currentPath)) {
-      return componentCache.get(currentPath)!;
-    }
+      // 1. 检查缓存
+      if (componentCache.has(currentPath)) {
+        asyncComp.value = componentCache.get(currentPath)!;
+        return;
+      }
 
-    // 步骤 2: 如果不在缓存中，创建一个新的异步组件
-    // defineAsyncComponent 是 Vue 官方的异步组件解决方案，非常适合这种场景。
-    const asyncComponent = defineAsyncComponent({
-      // 加载器函数，调用 vue3-sfc-loader 的 loadModule
-      loader: () => loadModule(currentPath, options),
-      // 可以在这里添加 loadingComponent, errorComponent 等高级选项
-      onError: (err) => {
-        console.error(
-          `[useVueComponent] Error loading component from ${currentPath}:`,
-          err
-        );
-      },
-    });
+      // 2. 定义异步组件
+      const comp = defineAsyncComponent({
+        loader: () => loadModule(currentPath, options),
+        onError: (err) => {
+          console.error(`[useVueComponent] Error loading ${currentPath}:`, err);
+        },
+      });
 
-    // 步骤 3: 将新创建的异步组件存入缓存
-    componentCache.set(currentPath, asyncComponent);
+      // 3. 写入缓存并更新状态
+      componentCache.set(currentPath, comp);
+      asyncComp.value = comp;
+    },
+    { immediate: true }
+  );
 
-    return asyncComponent;
-  });
+  return computed(() => asyncComp.value);
 }

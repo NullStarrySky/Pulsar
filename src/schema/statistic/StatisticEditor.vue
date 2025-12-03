@@ -1,11 +1,11 @@
 <!-- src/schema/statistic/StatisticEditor.vue -->
 <template>
-  <div class="space-y-6 p-4" v-if="localContent">
-    <!-- 消息统计部分 -->
+  <div class="space-y-6 p-4">
+    <!-- 1. 概览数据卡片 -->
     <section>
-      <h2 class="text-xl font-semibold mb-4">消息统计</h2>
+      <h2 class="text-xl font-semibold mb-4 tracking-tight">概览数据</h2>
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <!-- Card for User Messages -->
+        <!-- 用户消息 -->
         <Card>
           <CardHeader
             class="flex flex-row items-center justify-between space-y-0 pb-2"
@@ -15,230 +15,279 @@
           </CardHeader>
           <CardContent>
             <div class="text-2xl font-bold">
-              {{ localContent.userMessageCount }}
+              {{ statisticData.userMessageCount }}
             </div>
+            <p class="text-xs text-muted-foreground">累计发送的消息数量</p>
           </CardContent>
         </Card>
 
-        <!-- Card for Model Messages -->
+        <!-- 模型回复 -->
         <Card>
           <CardHeader
             class="flex flex-row items-center justify-between space-y-0 pb-2"
           >
-            <CardTitle class="text-sm font-medium">模型消息</CardTitle>
+            <CardTitle class="text-sm font-medium">模型回复</CardTitle>
             <Bot class="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div class="text-2xl font-bold">
-              {{ localContent.modelMessageCount }}
+              {{ statisticData.modelMessageCount }}
             </div>
+            <p class="text-xs text-muted-foreground">累计接收的回复数量</p>
           </CardContent>
         </Card>
 
-        <!-- Card for Total Messages -->
+        <!-- 总计 -->
         <Card>
           <CardHeader
             class="flex flex-row items-center justify-between space-y-0 pb-2"
           >
-            <CardTitle class="text-sm font-medium">总消息数</CardTitle>
+            <CardTitle class="text-sm font-medium">总交互数</CardTitle>
             <MessageSquare class="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div class="text-2xl font-bold">{{ totalMessageCount }}</div>
+            <p class="text-xs text-muted-foreground">所有对话交互总和</p>
           </CardContent>
         </Card>
       </div>
     </section>
 
-    <!-- 新的会话活跃度热力图 -->
+    <!-- 2. 月度活跃热力图 -->
     <section>
-      <h2 class="text-xl font-semibold mb-4">会话活跃度</h2>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold tracking-tight">活跃度热力图</h2>
+
+        <!-- 月份控制 -->
+        <div class="flex items-center space-x-2">
+          <Button variant="outline" size="icon" @click="changeMonth(-1)">
+            <ChevronLeft class="h-4 w-4" />
+          </Button>
+          <div class="w-32 text-center font-medium">
+            {{ currentYear }}年 {{ currentMonth + 1 }}月
+          </div>
+          <Button variant="outline" size="icon" @click="changeMonth(1)">
+            <ChevronRight class="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="sm" @click="resetToToday" class="ml-2">
+            回到今天
+          </Button>
+        </div>
+      </div>
+
       <Card>
         <CardContent class="p-6">
-          <div v-if="activityData.length > 0" class="heatmap-container">
+          <!-- 星期表头 -->
+          <div class="grid grid-cols-7 mb-2">
             <div
-              v-for="day in activityData"
-              :key="day.date"
-              class="heatmap-day-cell"
-              :style="{
-                backgroundColor: getColorForCount(day.count),
-              }"
+              v-for="day in weekDays"
+              :key="day"
+              class="text-center text-xs text-muted-foreground font-medium py-1"
             >
-              <div class="tooltip">
-                {{ day.count }} 次会话 on {{ day.date }}
-              </div>
+              {{ day }}
             </div>
           </div>
-          <div v-else class="text-center text-muted-foreground py-10">
-            暂无会话记录
+
+          <!-- 日历网格 -->
+          <div class="grid grid-cols-7 gap-2">
+            <TooltipProvider
+              v-for="(day, _) in calendarGrid"
+              :key="day.dateStr"
+            >
+              <Tooltip :delayDuration="0">
+                <TooltipTrigger as-child>
+                  <div
+                    class="aspect-square rounded-md flex items-center justify-center text-xs relative cursor-default transition-colors border"
+                    :class="[
+                      getCellColorClass(day.count),
+                      !day.isCurrentMonth ? 'opacity-30' : 'opacity-100',
+                      day.isToday ? 'ring-2 ring-primary ring-offset-2' : '',
+                    ]"
+                  >
+                    <span
+                      :class="
+                        day.count > 0
+                          ? 'text-primary-foreground font-medium'
+                          : 'text-muted-foreground'
+                      "
+                    >
+                      {{ day.dayNum }}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p class="font-semibold">{{ day.dateStr }}</p>
+                  <p class="text-xs text-muted-foreground">
+                    {{ day.count }} 次会话
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+
+          <!-- 图例 -->
+          <div
+            class="mt-6 flex items-center justify-end space-x-2 text-xs text-muted-foreground"
+          >
+            <span>少</span>
+            <div class="flex space-x-1">
+              <div class="w-3 h-3 rounded-sm bg-secondary"></div>
+              <div class="w-3 h-3 rounded-sm bg-emerald-200"></div>
+              <div class="w-3 h-3 rounded-sm bg-emerald-400"></div>
+              <div class="w-3 h-3 rounded-sm bg-emerald-600"></div>
+              <div class="w-3 h-3 rounded-sm bg-emerald-800"></div>
+            </div>
+            <span>多</span>
           </div>
         </CardContent>
       </Card>
     </section>
   </div>
-  <div v-else class="flex h-full w-full items-center justify-center">
-    <p class="text-muted-foreground">正在加载统计数据...</p>
-  </div>
 </template>
 
-<style scoped>
-/* 热力图样式 */
-.heatmap-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(1rem, 1fr));
-  grid-template-rows: repeat(7, 1rem);
-  grid-auto-flow: column;
-  gap: 3px;
-  max-width: 100%;
-  overflow-x: auto;
-  padding: 5px;
-}
-
-.heatmap-day-cell {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 2px;
-  background-color: #ebedf0; /* 默认无数据颜色 */
-  position: relative;
-  transition: transform 0.1s ease-in-out;
-}
-
-.heatmap-day-cell:hover {
-  transform: scale(1.2);
-  z-index: 10;
-}
-
-/* Tooltip 样式 */
-.heatmap-day-cell .tooltip {
-  visibility: hidden;
-  width: max-content;
-  background-color: #333;
-  color: #fff;
-  text-align: center;
-  border-radius: 6px;
-  padding: 5px 10px;
-  position: absolute;
-  z-index: 1;
-  bottom: 125%; /* 定位在元素上方 */
-  left: 50%;
-  transform: translateX(-50%);
-  opacity: 0;
-  transition: opacity 0.2s;
-  white-space: nowrap;
-  font-size: 0.8rem;
-}
-
-.heatmap-day-cell:hover .tooltip {
-  visibility: visible;
-  opacity: 1;
-}
-</style>
-
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from "vue";
+import { ref, computed } from "vue";
 import { useFileContent } from "@/features/FileSystem/composables/useFileContent";
 
-// 导入UI组件
+// Shadcn UI Components
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Bot, MessageSquare } from "lucide-vue-next";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Users,
+  Bot,
+  MessageSquare,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-vue-next";
 
-// --- 1. 类型定义 ---
+// --- 类型定义 ---
 interface Statistic {
   userMessageCount: number;
   modelMessageCount: number;
-  // 结构与原始定义保持一致
   timeIntervals: {
     [dateKey: string]: { start: string; end: string }[];
   };
 }
 
-interface ActivityData {
-  date: string;
+interface CalendarCell {
+  date: Date;
+  dateStr: string; // YYYY-MM-DD
+  dayNum: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
   count: number;
 }
 
-// --- 2. Props & 状态管理 ---
+// --- Props & Data Fetching ---
 const props = defineProps<{ path: string }>();
-const { content: remoteContent, sync } = useFileContent<Statistic>(props.path);
-const localContent = ref<Statistic | null>(null);
 
-// --- 3. 计算属性 (Computed Properties) ---
+// 使用 useFileContent 获取数据，但不解构 sync 方法，实现“纯渲染”
+const remoteContent = useFileContent<Statistic>(props.path);
 
-const totalMessageCount = computed<number>(() => {
-  if (!localContent.value) return 0;
+// 安全访问数据的计算属性
+const statisticData = computed<Statistic>(() => {
   return (
-    localContent.value.userMessageCount + localContent.value.modelMessageCount
+    remoteContent.value || {
+      userMessageCount: 0,
+      modelMessageCount: 0,
+      timeIntervals: {},
+    }
   );
 });
 
-/**
- * 计算用于热力图的数据。
- * 返回过去一年的每日活动数据。
- */
-const activityData = computed<ActivityData[]>(() => {
-  if (!localContent.value) return [];
-  const result: ActivityData[] = [];
-  const intervals = localContent.value.timeIntervals || {};
+// --- 概览统计逻辑 ---
 
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setFullYear(startDate.getFullYear() - 1);
-  startDate.setDate(startDate.getDate() + 1); // 从一年前的明天开始，确保大约是52-53周
-
-  // 确保第一天是周日，以对齐网格
-  const dayOfWeek = startDate.getDay(); // 0 = Sunday, 1 = Monday...
-  startDate.setDate(startDate.getDate() - dayOfWeek);
-
-  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-    const dateKey = d.toISOString().slice(0, 10); // "YYYY-MM-DD"
-    const intervalsOnDate = intervals[dateKey] || [];
-    result.push({
-      date: dateKey,
-      count: intervalsOnDate.length,
-    });
-  }
-  return result;
+const totalMessageCount = computed(() => {
+  return (
+    statisticData.value.userMessageCount + statisticData.value.modelMessageCount
+  );
 });
 
-/**
- * 根据会话次数返回不同的颜色。
- * @param count - 当天的会话次数
- */
-const getColorForCount = (count: number): string => {
-  if (count === 0) return "#ebedf0"; // 无贡献
-  if (count <= 2) return "#9be9a8"; // 少
-  if (count <= 5) return "#40c463"; // 中
-  if (count <= 10) return "#30a14e"; // 多
-  return "#216e39"; // 非常多
+// --- 日历/热力图逻辑 ---
+
+const currentDate = ref(new Date());
+const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+
+const currentYear = computed(() => currentDate.value.getFullYear());
+const currentMonth = computed(() => currentDate.value.getMonth());
+
+// 切换月份
+const changeMonth = (delta: number) => {
+  const newDate = new Date(currentDate.value);
+  newDate.setMonth(newDate.getMonth() + delta);
+  currentDate.value = newDate;
 };
 
-// --- 4. 数据同步与生命周期 ---
+// 回到今天
+const resetToToday = () => {
+  currentDate.value = new Date();
+};
 
-watch(
-  localContent,
-  (newContent) => {
-    if (newContent) {
-      sync(newContent);
-    }
-  },
-  { deep: true },
-);
+/**
+ * 生成当前视图的日历网格数据
+ */
+const calendarGrid = computed<CalendarCell[]>(() => {
+  const year = currentYear.value;
+  const month = currentMonth.value;
 
-watch(
-  remoteContent,
-  (newRemoteContent) => {
-    if (
-      JSON.stringify(newRemoteContent) !== JSON.stringify(localContent.value)
-    ) {
-      localContent.value = newRemoteContent
-        ? JSON.parse(JSON.stringify(newRemoteContent))
-        : null;
-    }
-  },
-  { immediate: true, deep: true },
-);
+  // 当月第一天
+  const firstDayOfMonth = new Date(year, month, 1);
+  // 当月最后一天
+  const lastDayOfMonth = new Date(year, month + 1, 0);
 
-onUnmounted(() => {
-  sync.cancel();
+  // 网格开始日期：第一天所在周的周日
+  const startDate = new Date(firstDayOfMonth);
+  startDate.setDate(startDate.getDate() - startDate.getDay());
+
+  // 网格结束日期：最后一天所在周的周六 (为了保持网格完整，通常显示42天即6周，或者动态计算)
+  // 这里我们动态计算直到填满最后一周
+  const endDate = new Date(lastDayOfMonth);
+  const neededToEnd = 6 - endDate.getDay();
+  endDate.setDate(endDate.getDate() + neededToEnd);
+
+  const grid: CalendarCell[] = [];
+  const iterator = new Date(startDate);
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  // 循环生成日期，直到超过结束日期
+  while (iterator <= endDate) {
+    const dateStr = iterator.toISOString().slice(0, 10);
+    const count = statisticData.value.timeIntervals[dateStr]?.length || 0;
+
+    grid.push({
+      date: new Date(iterator),
+      dateStr,
+      dayNum: iterator.getDate(),
+      isCurrentMonth: iterator.getMonth() === month,
+      isToday: dateStr === todayStr,
+      count,
+    });
+
+    iterator.setDate(iterator.getDate() + 1);
+  }
+
+  return grid;
 });
+
+/**
+ * 根据活跃度返回 Tailwind 类名
+ * 使用 emerald 色系，因为它在浅色和深色模式下表现都较好且符合“贡献度”直觉
+ */
+const getCellColorClass = (count: number): string => {
+  if (count === 0)
+    return "bg-secondary text-secondary-foreground hover:bg-secondary/80"; // 无数据：灰色/默认背景
+  if (count <= 2)
+    return "bg-emerald-200 dark:bg-emerald-900 border-emerald-200";
+  if (count <= 5)
+    return "bg-emerald-400 dark:bg-emerald-700 border-emerald-400";
+  if (count <= 10)
+    return "bg-emerald-600 dark:bg-emerald-600 border-emerald-600";
+  return "bg-emerald-800 dark:bg-emerald-500 border-emerald-800"; // 很多数据
+};
 </script>

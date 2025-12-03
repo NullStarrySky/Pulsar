@@ -5,7 +5,6 @@ import {
   Folder as FolderIcon,
   ChevronRight,
   ChevronDown,
-  Eye,
   FileEdit,
   FolderOpen,
   FolderSymlink,
@@ -16,6 +15,8 @@ import {
   Trash2,
   FileX2,
   Plus,
+  FileJson,
+  Image as ImageIcon,
 } from "lucide-vue-next";
 import {
   ContextMenu,
@@ -27,50 +28,86 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { getIconForFile, parseFileName } from "@/features/FileSystem/utils";
-import { useFileSystemStore } from "@/features/FileSystem/FileSystem.store";
-import { useUIStore } from "@/features/UI/UI.store";
-import join from "url-join";
-import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener";
+import { useFileOperations } from "../composables/useFileOperations";
 import { SemanticTypeMap, type SemanticType } from "@/schema/SemanticType";
-import { useFileSystemProxy } from "@/features/FileSystem/useFileSystemProxy";
+import type { FlatTreeItem } from "../composables/useFileTree";
 
 const props = defineProps<{
-  item: {
-    type: "file" | "folder";
-    path: string;
-    name: string;
-    indentLevel: number;
-    isExpanded?: boolean;
-  };
+  item: FlatTreeItem;
   isLocked: boolean;
   canPaste: boolean;
 }>();
 
-const store = useFileSystemStore();
-const uiStore = useUIStore();
+defineEmits<{
+  (e: "click"): void;
+  (e: "dblclick"): void;
+  (e: "create-file"): void;
+  (e: "create-folder"): void;
+  (e: "rename"): void;
+  (e: "delete"): void;
+  (e: "permanent-delete"): void;
+  (e: "cut"): void;
+  (e: "copy"): void;
+  (e: "duplicate"): void;
+  (e: "paste"): void;
+  (e: "copy-path", type: "relative" | "absolute" | "src"): void;
+}>();
 
-const parsedName = computed(() => parseFileName(props.item.name));
-const isFolder = computed(() => props.item.type === "folder");
-const icon = computed(() =>
-  isFolder.value ? FolderIcon : getIconForFile(props.item.name)
-);
-const isWatching = computed(() => store.watchedFiles.has(props.item.path));
+const ops = useFileOperations();
+
+// Icons
+const icon = computed(() => {
+  if (props.item.isFolder) return FolderIcon;
+  if (props.item.name.endsWith(".json")) return FileJson;
+  if (/\.(jpg|png|webp)$/i.test(props.item.name)) return ImageIcon;
+  return FileJson; // Default
+});
+
+// Semantic Types for Context Menu
 const creatableTypes = Object.keys(SemanticTypeMap).filter(
   (t) => t !== "unknown" && t !== "setting" && t !== "modelConfig"
 ) as SemanticType[];
 
 const handleCreateTyped = (type: SemanticType) => {
-  const proxy = useFileSystemProxy(props.item.path);
-  proxy.createTypedFile(`New ${type}`, type);
+  ops.handleCreateTyped(props.item.path, type);
 };
+
+// --- 新增逻辑: 计算显示名称 ---
+const displayName = computed(() => {
+  const name = props.item.name;
+  if (!name) return "";
+
+  // 1. 如果是文件夹，通常直接显示完整名称（防止像 v1.0 这样的文件夹被截断），
+  //    但如果你希望文件夹也隐藏类似语义标签的内容，可以去掉这个判断。
+  if (props.item.isFolder) {
+    return name;
+  }
+
+  // 2. 处理内置组件 (例如 $character -> character)
+  if (name.startsWith("$")) {
+    return name.substring(1);
+  }
+
+  // 3. 移除扩展名
+  const lastDotIndex = name.lastIndexOf(".");
+  const nameWithoutExt =
+    lastDotIndex !== -1 ? name.substring(0, lastDotIndex) : name;
+
+  // 4. 移除语义标签 (例如 name.[character] -> name)
+  const semanticMatch = nameWithoutExt.match(/\.\[(.*?)\]$/);
+  return semanticMatch
+    ? nameWithoutExt.substring(0, semanticMatch.index)
+    : nameWithoutExt;
+});
 </script>
 
 <template>
   <ContextMenu>
     <ContextMenuTrigger
-      class="flex items-center space-x-1 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer select-none group w-full"
-      :class="{ 'bg-accent': uiStore.uiState.activeFile === item.path }"
+      class="flex items-center space-x-1 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer select-none group w-full transition-colors"
+      :class="{
+        'bg-accent text-accent-foreground font-medium': false /* TODO: 对接 UI Store 的 activeFile */,
+      }"
       @click="$emit('click')"
       @dblclick="$emit('dblclick')"
     >
@@ -80,37 +117,35 @@ const handleCreateTyped = (type: SemanticType) => {
       >
         <!-- Chevron -->
         <component
-          v-if="isFolder"
+          v-if="item.isFolder"
           :is="item.isExpanded ? ChevronDown : ChevronRight"
-          class="h-4 w-4 shrink-0"
+          class="h-4 w-4 shrink-0 text-muted-foreground mr-1"
         />
-        <span v-else class="w-4 h-4 shrink-0"></span>
+        <span v-else class="w-4 h-4 shrink-0 mr-1"></span>
 
         <!-- Icon -->
-        <component :is="icon" class="ml-1 mr-2 h-4 w-4 shrink-0" />
-
-        <!-- Name -->
-        <span class="truncate">{{ parsedName.displayName }}</span>
-
-        <!-- Watch Status -->
-        <Eye
-          v-if="isWatching"
-          class="ml-auto mr-1 h-3 w-3 text-blue-500 shrink-0"
+        <component
+          :is="icon"
+          class="mr-2 h-4 w-4 shrink-0"
+          :class="item.isFolder ? 'text-blue-400' : 'text-slate-500'"
         />
+
+        <!-- Name: 使用 displayName 替换 item.name -->
+        <span class="truncate" :title="item.name">{{ displayName }}</span>
       </div>
     </ContextMenuTrigger>
 
     <ContextMenuContent class="w-56">
       <ContextMenuItem @select="$emit('create-file')">
-        <Plus class="mr-2 h-4 w-4" /><span>新建文件</span>
+        <Plus class="mr-2 h-4 w-4" />新建文件
       </ContextMenuItem>
       <ContextMenuItem @select="$emit('create-folder')">
-        <Plus class="mr-2 h-4 w-4" /><span>新建文件夹</span>
+        <Plus class="mr-2 h-4 w-4" />新建文件夹
       </ContextMenuItem>
 
-      <ContextMenuSub v-if="isFolder">
+      <ContextMenuSub v-if="item.isFolder">
         <ContextMenuSubTrigger>
-          <Plus class="mr-2 h-4 w-4" /><span>新建类型文件</span>
+          <Plus class="mr-2 h-4 w-4" />新建类型文件
         </ContextMenuSubTrigger>
         <ContextMenuSubContent>
           <ContextMenuItem
@@ -125,56 +160,46 @@ const handleCreateTyped = (type: SemanticType) => {
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem @select="openPath(join(store.fs.toPath, item.path))">
-        <FolderOpen class="mr-2 h-4 w-4" /><span>以默认方式打开</span>
+      <ContextMenuItem @select="$emit('copy-path', 'src')">
+        <FolderOpen class="mr-2 h-4 w-4" />复制 Asset URL
       </ContextMenuItem>
-      <ContextMenuItem
-        @select="revealItemInDir(join(store.fs.toPath, item.path))"
-      >
-        <FolderSymlink class="mr-2 h-4 w-4" /><span>在文件管理器中显示</span>
+      <ContextMenuItem @select="$emit('copy-path', 'absolute')">
+        <FolderSymlink class="mr-2 h-4 w-4" />复制绝对路径
       </ContextMenuItem>
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem @select="$emit('cut')"
-        ><Scissors class="mr-2 h-4 w-4" /><span>剪切</span></ContextMenuItem
-      >
-      <ContextMenuItem @select="$emit('copy')"
-        ><Copy class="mr-2 h-4 w-4" /><span>复制</span></ContextMenuItem
-      >
-      <ContextMenuItem @select="$emit('duplicate')"
-        ><CopyPlus class="mr-2 h-4 w-4" /><span>原地复制</span></ContextMenuItem
-      >
-      <ContextMenuItem @select="$emit('paste')" :disabled="!canPaste"
-        ><Clipboard class="mr-2 h-4 w-4" /><span>粘贴</span></ContextMenuItem
-      >
-
-      <ContextMenuSeparator />
-
-      <ContextMenuItem @select="$emit('rename')" :disabled="isLocked"
-        ><FileEdit class="mr-2 h-4 w-4" /><span>重命名</span></ContextMenuItem
-      >
-
-      <ContextMenuItem
-        v-if="!isFolder"
-        @select="store.toggleWatchFile(item.path)"
-      >
-        <Eye class="mr-2 h-4 w-4" /><span>{{
-          isWatching ? "取消监视" : "监视文件"
-        }}</span>
+      <ContextMenuItem @select="$emit('cut')" :disabled="isLocked">
+        <Scissors class="mr-2 h-4 w-4" />剪切
+      </ContextMenuItem>
+      <ContextMenuItem @select="$emit('copy')">
+        <Copy class="mr-2 h-4 w-4" />复制
+      </ContextMenuItem>
+      <ContextMenuItem @select="$emit('duplicate')" :disabled="isLocked">
+        <CopyPlus class="mr-2 h-4 w-4" />创建副本
+      </ContextMenuItem>
+      <ContextMenuItem @select="$emit('paste')" :disabled="!canPaste">
+        <Clipboard class="mr-2 h-4 w-4" />粘贴
       </ContextMenuItem>
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem @select="$emit('delete')" :disabled="isLocked"
-        ><Trash2 class="mr-2 h-4 w-4" /><span>移入垃圾桶</span></ContextMenuItem
-      >
+      <ContextMenuItem @select="$emit('rename')" :disabled="isLocked">
+        <FileEdit class="mr-2 h-4 w-4" />重命名
+      </ContextMenuItem>
+
+      <ContextMenuSeparator />
+
+      <ContextMenuItem @select="$emit('delete')" :disabled="isLocked">
+        <Trash2 class="mr-2 h-4 w-4" />移入垃圾桶
+      </ContextMenuItem>
       <ContextMenuItem
         @select="$emit('permanent-delete')"
         :disabled="isLocked"
-        class="text-red-600 focus:text-red-600"
-        ><FileX2 class="mr-2 h-4 w-4" /><span>永久删除</span></ContextMenuItem
+        class="text-red-600 focus:text-red-600 focus:bg-red-50"
       >
+        <FileX2 class="mr-2 h-4 w-4" />永久删除
+      </ContextMenuItem>
     </ContextMenuContent>
   </ContextMenu>
 </template>

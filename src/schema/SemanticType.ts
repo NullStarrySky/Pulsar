@@ -7,7 +7,9 @@ import { PresetDefinition } from "./preset/preset";
 import { StatisticDefinition } from "./statistic/statistic";
 import { SettingDefinition } from "./setting/setting";
 import { ModelConfigDefinition } from "./modelConfig/modelConfig";
+import { ManifestDefinition } from "./manifest/manifest";
 import { UnknownDefinition } from "./unknown/unknown";
+
 import { Schema } from "@/components/SchemaRenderer/SchemaRenderer.types";
 
 export type SemanticType =
@@ -20,6 +22,7 @@ export type SemanticType =
   | "character"
   | "lorebook"
   | "preset"
+  | "manifest"
   // 3. 回退类型，一律由unknownEditor处理。
   | "unknown";
 
@@ -42,6 +45,7 @@ export type SemanticTypeMap = {
   statistic: typeof StatisticDefinition;
   setting: typeof SettingDefinition;
   modelConfig: typeof ModelConfigDefinition;
+  manifest: typeof ManifestDefinition;
   unknown: typeof UnknownDefinition;
 };
 
@@ -53,6 +57,7 @@ export const SemanticTypeMap: SemanticTypeMap = {
   statistic: StatisticDefinition,
   setting: SettingDefinition,
   modelConfig: ModelConfigDefinition,
+  manifest: ManifestDefinition,
   unknown: UnknownDefinition,
 };
 

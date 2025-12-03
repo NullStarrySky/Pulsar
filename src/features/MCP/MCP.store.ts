@@ -22,8 +22,7 @@ export const useMcpManagerStore = defineStore("mcpManager", () => {
 
   // 使用 useFileContent 钩子自动管理 manifest.json 的读写和响应式
   // 这里的路径 "manifest.json" 对应 FileSystem.store.ts 初始化时的根目录文件
-  const { content: manifestContent, sync } =
-    useFileContent<ManifestContent>("manifest.json");
+  const manifestContent = useFileContent<ManifestContent>("manifest.json");
 
   // 计算属性：提取 mcpServers，如果文件未加载或字段不存在则返回空对象
   const mcpServers = computed(() => manifestContent.value?.mcpServers || {});
@@ -33,10 +32,6 @@ export const useMcpManagerStore = defineStore("mcpManager", () => {
   async function loadConfig() {
     if (!fsStore.isInitialized) {
       await fsStore.init();
-    }
-    // 触发一次读取（如果内容为空）
-    if (manifestContent.value === null) {
-      await fsStore.load("manifest.json");
     }
   }
 
@@ -48,9 +43,7 @@ export const useMcpManagerStore = defineStore("mcpManager", () => {
       ...currentManifest,
       mcpServers: newServers,
     };
-
-    // 调用 useFileContent 的 sync 方法写入文件系统
-    await sync(newManifest);
+    manifestContent.value = newManifest;
   }
 
   // Action: 添加/更新单个 Server

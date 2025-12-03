@@ -1,10 +1,27 @@
-补充缺失的逻辑
-对话界面优化
+
+
+对话界面，自定义组件
+拖拽又坏了，重命名又坏了
+真的是，每次都这两个功能出问题。
+全局资源默认应该开启，在创建的时候。
+monacoEditor
+
+测试更新：
+manifest, chat, lorebook, preset，characterLibrary等界面
+
+理论上是不是可以干掉sidecar呢？怎么感觉可以呢…………
+合并sidecar到主要功能/
 
 
 
 
 
+
+
+
+
+自动更新器
+schema对外统一创建包装器，方便互相引用和创建，以及index.ts
 1. 图片生成
 2. 音频生成和移动端
 3. 内联组件和侧栏组件的完全实装（provider-inject以及封装专门的teleport组件)

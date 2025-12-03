@@ -1,4 +1,4 @@
-// src/schema/chat/api.types.ts
+// src/schema/chat/EnhancedApiReadyContext/api.types.ts
 import type { role } from "../../shared.types";
 import type { ApiReadyMessage } from "../chat.types";
 import type { FilePart, ImagePart, TextPart } from "ai";

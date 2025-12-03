@@ -15,34 +15,31 @@ export interface TaskItem {
   status: TaskStatus;
   startTime: number;
   endTime?: number;
-  message?: string; // 成功消息或错误报错
-  abortController?: AbortController; // 用于取消任务的控制器
+  message?: string;
+  abortController?: AbortController;
 }
 
 export const useTaskStore = defineStore("task", () => {
   const tasks = ref<TaskItem[]>([]);
 
-  // 计算属性：按时间倒序排列
   const sortedTasks = computed(() => {
     return [...tasks.value].sort((a, b) => b.startTime - a.startTime);
   });
 
-  // 获取正在运行的任务数量（用于在底栏显示角标等）
   const runningCount = computed(
     () => tasks.value.filter((t) => t.status === "running").length
   );
 
-  // --- Actions ---
-
   /**
-   * 推入并执行一个任务
+   * 分发一个任务
    * @param name 任务名称
-   * @param taskFn 任务函数，接收一个 signal 用于处理取消逻辑
+   * @param taskFn 任务逻辑，接收 signal
+   * @returns Promise<T> 返回任务结果，如果被取消或失败会抛出异常
    */
   async function dispatchTask<T>(
     name: string,
     taskFn: (signal: AbortSignal) => Promise<T>
-  ) {
+  ): Promise<T> {
     const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
     const controller = new AbortController();
 
@@ -54,54 +51,55 @@ export const useTaskStore = defineStore("task", () => {
       abortController: controller,
     };
 
-    tasks.value.unshift(task); // 添加到列表头部
+    tasks.value.unshift(task);
 
     try {
-      // 执行传入的 Promise 逻辑
+      if (controller.signal.aborted) {
+        throw new DOMException("Task started as cancelled", "AbortError");
+      }
+
       const result = await taskFn(controller.signal);
 
-      // 如果还没被取消，标记为成功
+      // 再次检查，防止在 await 期间被取消
+      if (controller.signal.aborted) {
+        throw new DOMException("Task cancelled during execution", "AbortError");
+      }
+
       if (task.status === "running") {
         task.status = "success";
-        task.message = typeof result === "string" ? result : "Completed";
+        task.message = typeof result === "string" ? result : "完成";
       }
+      return result;
     } catch (error: any) {
-      if (task.status === "cancelled") return; // 已经被标记取消则忽略错误
-
-      // 检查是否是 AbortError
       if (error.name === "AbortError" || controller.signal.aborted) {
         task.status = "cancelled";
-        task.message = "Manually Cancelled";
+        task.message = "已取消";
       } else {
         task.status = "error";
-        task.message = error.message || "Unknown Error";
+        task.message = error.message || "未知错误";
       }
+      throw error; // 继续抛出，以便调用者知道失败了
     } finally {
-      task.endTime = Date.now();
-      task.abortController = undefined; // 清理引用
+      if (!task.endTime) task.endTime = Date.now();
+      task.abortController = undefined;
     }
   }
 
-  // 取消任务
   function cancelTask(id: string) {
     const task = tasks.value.find((t) => t.id === id);
     if (task && task.status === "running" && task.abortController) {
-      task.abortController.abort(); // 触发 AbortSignal
+      task.message = "正在取消...";
+      task.abortController.abort(); // 触发 Signal
+      // 状态修改由 dispatchTask 的 catch 块最终确认，但为了 UI 即时响应可先标记
       task.status = "cancelled";
-      task.endTime = Date.now();
-      task.message = "Cancelling...";
     }
   }
 
-  // 移除单个任务记录
   function removeTask(id: string) {
     const index = tasks.value.findIndex((t) => t.id === id);
-    if (index !== -1) {
-      tasks.value.splice(index, 1);
-    }
+    if (index !== -1) tasks.value.splice(index, 1);
   }
 
-  // 清理所有非运行状态的任务
   function clearCompleted() {
     tasks.value = tasks.value.filter((t) => t.status === "running");
   }

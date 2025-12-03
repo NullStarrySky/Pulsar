@@ -140,14 +140,6 @@ const providersConfig = computed<ProviderMetadata>(() => {
   const rawConfig = fsStore.modelConfig;
   if (!rawConfig) return {};
 
-  // 如果是 ModelConfigWrapper 实例或包含 providers 属性的对象
-  if (
-    "providers" in rawConfig &&
-    typeof (rawConfig as any).providers === "object"
-  ) {
-    return (rawConfig as any).providers as ProviderMetadata;
-  }
-
   // 否则假设它本身就是 ProviderMetadata (Record<string, ProviderData>)
   return rawConfig as unknown as ProviderMetadata;
 });

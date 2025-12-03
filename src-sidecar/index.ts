@@ -5,6 +5,7 @@ import expressWs from "express-ws";
 import cors from "cors";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as fsPromises from "node:fs/promises";
 import fetch, {
   type RequestInfo,
   type RequestInit,
@@ -12,7 +13,7 @@ import fetch, {
   Response as FetchResponse,
 } from "node-fetch";
 import { AIService } from "./aiService";
-import type { ModelConfig } from "./model-hydration";
+import type { ModelConfig } from "../src/schema/modelConfig/modelconfig.types";
 import pino from "pino";
 import pretty from "pino-pretty";
 import Exa from "exa-js";
@@ -49,20 +50,35 @@ let aiService: AIService;
 async function loadSecrets(): Promise<void> {
   try {
     const content = await fs.readFile(secretsPath, "utf-8");
-    secrets = JSON.parse(content);
-    logger.info({ path: secretsPath, secrets }, "Secrets loaded.");
+    const newSecrets = JSON.parse(content);
+
+    // 不要重新赋值全局的 secrets 对象。
+    // 而是清空当前对象，然后将新密钥的属性复制过来，免得引用问题。
+
+    // 1. 删除旧对象中的所有键
+    for (const key in secrets) {
+      if (Object.prototype.hasOwnProperty.call(secrets, key)) {
+        delete secrets[key];
+      }
+    }
+
+    // 2. 将新密钥的属性复制到现有对象中
+    Object.assign(secrets, newSecrets);
+
+    logger.info(
+      { path: secretsPath },
+      "Secrets reloaded successfully into the existing object."
+    );
   } catch (error) {
     logger.error(
       { err: error, path: secretsPath },
       "Failed to read or parse secrets.json."
     );
-    // 抛出错误，以便初始化流程可以捕获它并向客户端报告失败
     throw new Error(
       `Failed to load secrets from ${secretsPath}. Ensure the file exists and is valid JSON.`
     );
   }
 }
-
 async function replaceSecretsInString(input: string): Promise<string> {
   if (typeof input !== "string" || !input.includes("{{SECRET:")) {
     return input;
@@ -129,6 +145,21 @@ expressApp.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// [新增] 手动重载密钥的 API 端点
+expressApp.post("/api/secrets/reload", async (_: Request, res: Response) => {
+  if (!isInitialized) {
+    return res.status(503).json({ error: "Server is not initialized yet." });
+  }
+  try {
+    await loadSecrets();
+    logger.info("Secrets reloaded successfully via API call.");
+    res.json({ success: true, message: "Secrets reloaded successfully." });
+  } catch (e) {
+    logger.error({ err: e }, "Failed to reload secrets via API call.");
+    res.status(500).json({ success: false, error: (e as Error).message });
+  }
+});
+
 // --- AI 服务 WebSocket 端点 ---
 expressApp.ws("/ws", (ws, _) => {
   console.log("websocket In");
@@ -148,8 +179,6 @@ expressApp.ws("/ws", (ws, _) => {
 
   ws.onmessage = (message) => {
     console.log("messageIn");
-    // express-ws 的 onmessage 事件参数本身就是 MessageEvent
-    // 但其 data 可能是 Buffer, ArrayBuffer 等, aiService 需要 string
     const event = { data: message.data.toString("utf-8") } as MessageEvent;
     handlers.onMessage(event, ws);
   };
@@ -160,10 +189,9 @@ expressApp.ws("/ws", (ws, _) => {
 
   ws.onerror = (err) => {
     logger.error({ err }, "WebSocket connection error.");
-    handlers.onClose(); // 发生错误时也应该清理资源
+    handlers.onClose();
   };
 });
-
 // =================================================================================
 // Web Search 工具集处理逻辑
 // =================================================================================
@@ -172,7 +200,7 @@ expressApp.post("/api/tools/websearch", async (req: Request, res: Response) => {
   try {
     const { provider, query, options } = req.body as {
       provider: "exa" | "firecrawl";
-      query: string; // 对于 exa 是查询词，对于 firecrawl 是 url
+      query: string;
       options?: any;
     };
 
@@ -185,6 +213,7 @@ expressApp.post("/api/tools/websearch", async (req: Request, res: Response) => {
     let result;
 
     if (provider === "exa") {
+      // ... (exa 的逻辑是正确的，保持不变) ...
       const apiKey = secrets["EXA_API_KEY"] || process.env.EXA_API_KEY;
       if (!apiKey) {
         return res
@@ -193,7 +222,6 @@ expressApp.post("/api/tools/websearch", async (req: Request, res: Response) => {
       }
 
       const exa = new Exa(apiKey);
-      // 默认配置，可根据 options 覆盖
       const searchOptions = {
         numResults: 3,
         useAutoprompt: true,
@@ -201,7 +229,6 @@ expressApp.post("/api/tools/websearch", async (req: Request, res: Response) => {
         ...options,
       };
 
-      // 这里使用 searchAndContents 获取内容
       const exaRes = await exa.searchAndContents(query, searchOptions);
       result = exaRes.results.map((r: any) => ({
         title: r.title,
@@ -219,40 +246,36 @@ expressApp.post("/api/tools/websearch", async (req: Request, res: Response) => {
           .json({ error: "FIRECRAWL_API_KEY not found in secrets." });
       }
 
-      // 2. 使用新的初始化方式
-      const app = new Firecrawl({ apiKey });
+      // [修正] 实例化 FirecrawlApp，与 import 语句保持一致
+      const app = new FirecrawlApp({ apiKey });
 
-      // 3. 判断 query 是 URL 还是搜索关键词
       const isUrl = /^(http|https):\/\/[^ "]+$/.test(query);
 
       if (isUrl) {
-        // CASE A: 如果是 URL，执行 Scrape (抓取单页)
+        // [保持不变] scrape 逻辑正确
         const scrapeResponse = await app.scrape(query, {
           formats: ["markdown"],
-          ...options, // 允许前端覆盖 formats, actions 等
+          ...options,
         });
 
         if (!scrapeResponse.success) {
           throw new Error(`Firecrawl scrape failed: ${scrapeResponse.error}`);
         }
 
-        // 构造统一返回格式
         result = [
           {
             title: scrapeResponse.data.metadata?.title || "No Title",
             url: scrapeResponse.data.metadata?.sourceURL || query,
             content: scrapeResponse.data.markdown || "",
             publishedDate: scrapeResponse.data.metadata?.date,
-            // Firecrawl metadata 可能包含 description, language 等
           },
         ];
       } else {
-        // CASE B: 如果是关键词，执行 Search (搜索并抓取)
-        // 文档中提到 search 可以配合 scrapeOptions 使用
+        // [保持不变] search 逻辑正确
         const searchResponse = await app.search(query, {
-          limit: 3, // 默认搜索3条
+          limit: 3,
           scrapeOptions: {
-            formats: ["markdown"], // 搜索结果直接转 Markdown
+            formats: ["markdown"],
           },
           ...options,
         });
@@ -261,14 +284,12 @@ expressApp.post("/api/tools/websearch", async (req: Request, res: Response) => {
           throw new Error(`Firecrawl search failed: ${searchResponse.error}`);
         }
 
-        // 注意：当使用了 scrapeOptions，data 是一个对象数组
-        // 文档示例: { success: true, data: [ { title, url, markdown, ... } ] }
         const dataList = searchResponse.data as any[];
 
         result = dataList.map((item) => ({
           title: item.title || "No Title",
           url: item.url,
-          content: item.markdown || item.description || "", // 优先用全文，否则用简介
+          content: item.markdown || item.description || "",
           publishedDate: item.metadata?.date,
         }));
       }
@@ -389,11 +410,9 @@ expressApp.post("/api/fetch", async (req: Request, res: Response) => {
     });
 
     res.status(response.status).set(headers);
-    // 添加一个检查来确保 response.body 不是 null
     if (response.body) {
       response.body.pipe(res);
     } else {
-      // 如果没有响应体，只需结束响应即可
       res.end();
     }
   } catch (e) {
@@ -411,30 +430,23 @@ async function initializeServices() {
   }
 
   secretsPath = path.join(appDataDir, "secrets.json");
+  // 首次加载密钥
   await loadSecrets();
 
   const modelConfigPath = path.join(
     appDataDir,
     "modelConfig.[modelConfig].json"
   );
-
-  // 移除 ensureFile 调用，直接尝试读取
-
   try {
-    const configContent = await fs.readFile(modelConfigPath, "utf-8");
+    const configContent = await fsPromises.readFile(modelConfigPath, "utf-8");
     modelConfig = JSON.parse(configContent);
-    logger.info(
-      `Loaded ${
-        modelConfig.customProviders?.length ?? 0
-      } custom model providers.`
-    );
+    logger.info(`Loaded ${Object.keys(modelConfig).length} model providers.`);
   } catch (e) {
     logger.error(
       { err: e },
       "Failed to load or parse modelConfig file. Using empty configuration."
     );
-    // 如果读取失败，优雅地降级为默认配置
-    modelConfig = { customProviders: [] };
+    modelConfig = {};
   }
 
   envProxy = new Proxy(process.env, {
@@ -464,39 +476,6 @@ async function main() {
       logger.info(`Sidecar server listening on http://0.0.0.0:${port}`);
       logger.info("Waiting for appDataDir from the main application...");
     });
-
-    // =========================================================================
-    // vvvvvvvvvvvvvvvvvvvvvvv DEBUGGING LOGIC vvvvvvvvvvvvvvvvvvvvvvv
-    // =========================================================================
-    try {
-      logger.info("\n--- [DEBUG] SENDING INITIALIZATION REQUEST ---");
-      // Give server a moment to start before fetching
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const response = await fetch(`http://127.0.0.1:4130/api/init`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          appDataDir:
-            "C:\\Users\\28360\\AppData\\Roaming\\com.tauri-app.pulsar",
-        }),
-      });
-      const responseBody = await response.json();
-      logger.info(
-        {
-          status: response.status,
-          body: responseBody,
-        },
-        "--- [DEBUG] RESPONSE ---"
-      );
-    } catch (error) {
-      logger.error(
-        { err: error },
-        "--- [DEBUG] FAILED TO SEND INIT REQUEST ---"
-      );
-    }
-    // =========================================================================
-    // ^^^^^^^^^^^^^^^^^^^^^^^ END OF DEBUGGING LOGIC ^^^^^^^^^^^^^^^^^^^^^^^^^^
-    // =========================================================================
   } catch (err) {
     logger.fatal({ err }, "Server startup failed");
     process.exit(1);

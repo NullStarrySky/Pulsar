@@ -1,13 +1,10 @@
 // src/schema/manifest/composables/useInlineResources.ts
-
-import { computed, Ref, unref } from "vue";
+import { computed, unref, type Ref } from "vue";
 import {
   useFileSystemStore,
-  isFolderNode,
-  type FolderContent,
+  VirtualFolder,
+  VirtualFile,
 } from "@/features/FileSystem/FileSystem.store";
-import { useFileSystemProxy } from "@/features/FileSystem/useFileSystemProxy";
-import urlJoin from "url-join";
 import defaultAvatar from "@/assets/default.jpg";
 
 export function useInlineResources(activeFilePath: Ref<string | null>) {
@@ -17,15 +14,16 @@ export function useInlineResources(activeFilePath: Ref<string | null>) {
   const parentDirPath = computed(() => {
     const path = unref(activeFilePath);
     if (!path) return null;
-    return path.split("/").slice(0, -1).join("/");
+    const parts = path.split("/");
+    return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
   });
 
-  /** 获取父目录的节点 */
+  /** 获取父目录节点 */
   const parentNode = computed(() => {
     const dir = parentDirPath.value;
-    if (!dir) return null;
-    const node = store.getNodeByPath(store.fileStructure, dir);
-    return isFolderNode(node) ? (node as FolderContent) : null;
+    if (dir === null) return null; // 根目录传空字符串是允许的，但 null 不行
+    const node = store.resolvePath(dir);
+    return node instanceof VirtualFolder ? node : null;
   });
 
   /**
@@ -34,8 +32,7 @@ export function useInlineResources(activeFilePath: Ref<string | null>) {
    */
   const inlineResources = computed(() => {
     const activePath = unref(activeFilePath);
-    const node = parentNode.value;
-    const dir = parentDirPath.value;
+    const folder = parentNode.value;
 
     const result: Record<"character" | "lorebook" | "preset", string[]> = {
       character: [],
@@ -43,17 +40,20 @@ export function useInlineResources(activeFilePath: Ref<string | null>) {
       preset: [],
     };
 
-    if (!node || !dir) return result;
+    if (!folder) return result;
 
-    Object.keys(node).forEach((fileName) => {
-      const filePath = urlJoin(dir, fileName);
-      if (filePath === activePath) return; // 排除自己
+    for (const [_, node] of folder.children) {
+      if (node instanceof VirtualFile) {
+        if (node.path === activePath) continue;
 
-      const semanticType = store.fs.getSemanticType(fileName);
-      if (["character", "lorebook", "preset"].includes(semanticType)) {
-        result[semanticType as keyof typeof result].push(filePath);
+        // 使用新文件系统中的 getter 获取语义类型
+        const type = node.semanticType;
+        if (type && ["character", "lorebook", "preset"].includes(type)) {
+          // @ts-ignore
+          result[type].push(node.path);
+        }
       }
-    });
+    }
 
     return result;
   });
@@ -63,19 +63,19 @@ export function useInlineResources(activeFilePath: Ref<string | null>) {
    * 获取同级目录下的 Avatar.* 文件
    */
   const avatarSrc = computed(() => {
-    const node = parentNode.value;
-    const dir = parentDirPath.value;
+    const folder = parentNode.value;
+    if (!folder) return defaultAvatar;
 
-    if (node && dir) {
-      const avatarName = Object.keys(node).find((name) =>
-        name.startsWith("Avatar.")
-      );
-      if (avatarName) {
-        return store.convertFileSrc(urlJoin(dir, avatarName));
+    // 查找名为 Avatar.xxx 的文件
+    for (const [name, node] of folder.children) {
+      if (
+        node instanceof VirtualFile &&
+        name.match(/^Avatar\.(png|jpg|jpeg|webp|gif)$/i)
+      ) {
+        return node.url; // 利用 VirtualNode 的 url getter (已处理 tauri 协议)
       }
     }
 
-    // 不存在则返回默认
     return defaultAvatar;
   });
 
@@ -84,33 +84,28 @@ export function useInlineResources(activeFilePath: Ref<string | null>) {
    * 上传文件并删除旧头像
    */
   const setAvatar = async (file: File) => {
-    const dir = parentDirPath.value;
-    if (!dir) throw new Error("无法在未保存的环境中设置头像");
-
-    const node = parentNode.value;
-    const fsProxy = useFileSystemProxy(dir);
+    const folder = parentNode.value;
+    if (!folder) throw new Error("无法在未保存的环境中设置头像");
 
     // 1. 删除旧头像
-    if (node) {
-      const oldAvatars = Object.keys(node).filter((name) =>
-        name.startsWith("Avatar.")
-      );
-      for (const oldName of oldAvatars) {
-        // 使用 Proxy 或 Store 的 delete 方法
-        delete (fsProxy as any)[oldName];
+    const oldAvatars: VirtualFile[] = [];
+    for (const [name, node] of folder.children) {
+      if (node instanceof VirtualFile && name.match(/^Avatar\./i)) {
+        oldAvatars.push(node);
       }
     }
 
-    // 确保删除操作完成 (等待 store 任务队列)
-    await Promise.all(store.tasks);
+    // 并行删除旧文件
+    await Promise.all(oldAvatars.map((f) => f.delete()));
 
-    // 2. 上传新头像
-    // 注意：Store.uploadFile 通常会自动处理文件名冲突或保留扩展名，建议重命名为 Avatar.ext
+    // 2. 导入新头像并重命名
     const ext = file.name.split(".").pop() || "png";
     const newFileName = `Avatar.${ext}`;
-    const renamedFile = new File([file], newFileName, { type: file.type });
 
-    await store.uploadFile(dir, renamedFile);
+    // 我们先导入（importFile 会自动处理重名，但我们刚刚删除了旧的），然后重命名确保名字正确
+    // 或者构造一个新的 File 对象
+    const renamedFile = new File([file], newFileName, { type: file.type });
+    await folder.importFile(renamedFile);
   };
 
   return {

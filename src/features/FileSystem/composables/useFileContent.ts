@@ -1,164 +1,101 @@
 // src/features/FileSystem/composables/useFileContent.ts
+import { useFileSystemStore, VirtualFile } from "../FileSystem.store";
 import {
-  useFileSystemStore,
-  FileNode,
-  isFolderNode,
-} from "../FileSystem.store";
-import { computed, ComputedRef, unref, type Ref } from "vue";
+  computed,
+  unref,
+  watch,
+  type Ref,
+  type WritableComputedRef,
+} from "vue";
 import { debounce } from "lodash-es";
-import type { DebouncedFunc } from "lodash";
 
-/**
- * 从 KV 文件系统中获取指定路径的文件内容，并提供一个同步函数将其写回。
- * 自动处理 JSON 文件的解析，并在内容未加载时从磁盘加载。
- * @param path - 文件路径，可以是 ref、字符串或 null。
- * @param debounceMs - sync 函数的防抖延迟时间（毫秒）。
- * @returns 包含响应式内容和同步函数的对象。
- */
-export function useFileContent<T>(
+export function useFileContent<T = any>(
   path: Ref<string | null> | string | null,
-  debounceMs: number = 500,
-): {
-  content: ComputedRef<T | null>;
-  sync: DebouncedFunc<(newData?: T) => Promise<void>>;
-} {
+  debounceMs: number = 1000
+): WritableComputedRef<T | null> {
   const store = useFileSystemStore();
 
-  const content = computed<T | null>(() => {
-    const currentPath = unref(path);
-    if (!currentPath) {
-      return null;
-    }
+  // --- 1. 核心保存逻辑 ---
 
-    // 直接从原始文件结构中获取节点，绕过 proxy 的 get 陷阱
-    const node = store.getNodeByPath(store.fileStructure, currentPath);
-
-    if (node === undefined) {
-      return null;
-    }
-
-    // 如果是文件夹节点，直接返回null，此hook仅用于文件
-    if (isFolderNode(node)) {
-      console.warn(
-        `[useFileContent] Path '${currentPath}' points to a directory, not a file.`,
-      );
-      return null;
-    }
-
-    if (node instanceof FileNode && node.content === null) {
-      store.load(currentPath);
-      return null;
-    }
-
-    const rawContent = node instanceof FileNode ? node.content : node;
-
-    if (rawContent === null || rawContent === undefined) {
-      return null;
-    }
-
-    if (typeof rawContent === "object" && !(rawContent instanceof Uint8Array)) {
-      return rawContent as T;
-    }
-
-    if (typeof rawContent === "string" && currentPath.endsWith(".json")) {
+  // 实际执行写入的操作
+  const performWrite = async (filePath: string, data: any) => {
+    const node = store.resolvePath(filePath);
+    if (node instanceof VirtualFile) {
       try {
-        return JSON.parse(rawContent);
+        await node.write(data);
+        console.debug(`[AutoSave] Saved: ${filePath}`);
       } catch (e) {
-        console.error(`[useFileContent] 解析 JSON 文件失败 ${currentPath}`, e);
-        return null;
+        console.error(`[AutoSave] Failed to save ${filePath}`, e);
       }
     }
+  };
 
-    return rawContent as T;
+  // 创建防抖函数。
+  // 但为了防止路径快速切换导致的数据错乱，我们需要精细控制。
+  // 这里的策略是：防抖函数绑定在“当前路径”上。
+  const debouncedWriteMap = new Map<string, ReturnType<typeof debounce>>();
+
+  const getDebouncedWriter = (filePath: string) => {
+    if (!debouncedWriteMap.has(filePath)) {
+      const writer = debounce(
+        (data: any) => performWrite(filePath, data),
+        debounceMs
+      );
+      debouncedWriteMap.set(filePath, writer);
+    }
+    return debouncedWriteMap.get(filePath)!;
+  };
+
+  // --- 2. 自动加载与路径切换处理 ---
+  watch(
+    () => unref(path),
+    async (newPath, oldPath) => {
+      // Flush 旧文件的写入
+      if (oldPath && debouncedWriteMap.has(oldPath)) {
+        debouncedWriteMap.get(oldPath)!.flush();
+        debouncedWriteMap.delete(oldPath);
+      }
+      // 加载新文件
+      if (newPath) {
+        const node = store.resolvePath(newPath);
+        if (node instanceof VirtualFile && !store.contentCache.has(newPath)) {
+          await node.read().catch(console.error);
+        }
+      }
+    },
+    { immediate: true }
+  );
+
+  // --- 构造返回值 ---
+  const content = computed({
+    get: () => {
+      const p = unref(path);
+      // 利用 Vue 的响应式特性，这里返回的如果是对象，就是 Proxy
+      return p ? (store.contentCache.get(p) as T) || null : null;
+    },
+    set: (newVal) => {
+      const p = unref(path);
+      if (!p) return;
+      // Setter 只负责更新 Store (内存状态)
+      // Vue 的响应式系统会自动触发下面的 Watcher
+      store.contentCache.set(p, newVal);
+    },
   });
 
-  const _performSync = async (dataToSync: T | null): Promise<void> => {
-    const currentPath = unref(path);
-    if (!currentPath) {
-      console.warn("[useFileContent] 路径为空，无法同步。");
-      return;
-    }
+  // --- 统一监听副作用 ---
+  watch(
+    content, // 监听 computed 的返回值
+    (newVal) => {
+      const p = unref(path);
+      // 只有当路径存在，且内容不为 null/undefined 时才写入
+      // (防止文件刚加载尚未读取完成时覆盖为空)
+      if (!p || newVal === undefined || newVal === null) return;
 
-    if (dataToSync === null || dataToSync === undefined) {
-      console.warn(`[useFileContent] 内容为空，无法同步路径: ${currentPath}。`);
-      return;
-    }
+      // 触发防抖写入
+      getDebouncedWriter(p)(newVal);
+    },
+    { deep: true } // 关键：深度监听对象内部变化 (content.value.a.b = 1)
+  );
 
-    // 如果是JSON文件且数据是对象，则提前将其字符串化。
-    // 这可以防止代理层对原始对象进行不正确的处理（例如，递归包装）。
-    let dataForProxy: string | Uint8Array | object | null = dataToSync as any;
-    if (
-      currentPath.endsWith(".json") &&
-      typeof dataForProxy === "object" &&
-      dataForProxy !== null &&
-      !(dataForProxy instanceof Uint8Array)
-    ) {
-      dataForProxy = JSON.stringify(dataForProxy, null, 2);
-    }
-
-    const parts = currentPath.split("/").filter(Boolean);
-    const fileName = parts.pop();
-    if (!fileName) {
-      throw new Error(`[useFileContent] 无效的文件路径: ${currentPath}`);
-    }
-
-    let parentProxy: any = store.fs;
-    for (const part of parts) {
-      if (typeof parentProxy !== "object" || parentProxy === null) {
-        throw new Error(
-          `[useFileContent] 无法找到用于同步的父目录: ${currentPath}`,
-        );
-      }
-      parentProxy = parentProxy[part];
-    }
-
-    if (typeof parentProxy === "object" && parentProxy !== null) {
-      // 使用处理过的数据进行写入
-      parentProxy[fileName] = dataForProxy;
-      await Promise.all(store.tasks);
-      console.log(`[useFileContent] Synced changes for: ${currentPath}`);
-    } else {
-      throw new Error(
-        `[useFileContent] 找不到父目录代理以同步文件: ${currentPath}`,
-      );
-    }
-  };
-
-  const debouncedSync = debounce(async (newData?: T) => {
-    const currentPath = unref(path);
-    if (!currentPath) return;
-
-    const contentToSync = newData !== undefined ? newData : content.value;
-
-    const node = store.getNodeByPath<FileNode>(
-      store.fileStructure,
-      currentPath,
-    );
-    if (node instanceof FileNode && node.content) {
-      if (currentPath.endsWith(".json")) {
-        try {
-          // 规范化比较：都转换成无格式的JSON字符串进行比较
-          const oldContent = JSON.stringify(JSON.parse(node.content as string));
-          const newContent = JSON.stringify(contentToSync);
-          if (oldContent === newContent) {
-            return; // 内容相同，无需同步
-          }
-        } catch (e) {
-          // 如果旧内容解析失败，则允许写入以修复文件
-        }
-      } else {
-        // 对非JSON文件进行直接比较
-        if (node.content === contentToSync) {
-          return; // 内容相同，无需同步
-        }
-      }
-    }
-
-    await _performSync(contentToSync as T | null);
-  }, debounceMs);
-
-  return {
-    content,
-    sync: debouncedSync,
-  };
+  return content as WritableComputedRef<T | null>;
 }

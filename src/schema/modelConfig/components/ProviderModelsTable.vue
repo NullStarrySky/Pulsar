@@ -46,7 +46,20 @@
                     <TableCell>
                       <Switch v-model="model.enabled" />
                     </TableCell>
-                    <TableCell class="font-medium">{{ model.name }}</TableCell>
+                    <TableCell class="font-medium">
+                      <TooltipProvider :delay-duration="100">
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <span class="block max-w-[200px] truncate">
+                              {{ model.name }}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{{ model.name }}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
                     <TableCell v-if="typeKey === 'chat'">
                       <div class="flex items-center gap-3">
                         <TooltipProvider
@@ -77,9 +90,7 @@
                         </TooltipProvider>
                       </div>
                     </TableCell>
-                    <!-- [MODIFIED] 非chat模型显示占位符 -->
                     <TableCell v-else>-</TableCell>
-                    <!-- [MODIFIED] 添加测试按钮 -->
                     <TableCell class="text-right">
                       <div class="flex items-center justify-end gap-2">
                         <Button
@@ -101,7 +112,7 @@
                                 | 'embedding'
                                 | 'image'
                                 | 'speech'
-                                | 'transcription',
+                                | 'transcription'
                             )
                           "
                         >
@@ -112,9 +123,8 @@
                   </TableRow>
                 </template>
                 <TableRow v-else>
-                  <!-- [MODIFIED] 更新 colspan -->
                   <TableCell
-                    :colspan="typeKey === 'chat' ? 5 : 4"
+                    :colspan="typeKey === 'chat' ? 4 : 3"
                     class="h-24 text-center"
                   >
                     该类型下没有可用的模型。
@@ -303,11 +313,14 @@ type EditingModel = {
 };
 
 // --- Props and Emits ---
-defineProps<{ models: ProviderModels }>();
+const props = defineProps<{
+  models: ProviderModels;
+  providerKey: string;
+}>();
 const emit = defineEmits<{
   (
     e: "add-model",
-    payload: { newModel: ModelPayload; typeKey: keyof ProviderModels },
+    payload: { newModel: ModelPayload; typeKey: keyof ProviderModels }
   ): void;
   (
     e: "update-model",
@@ -315,11 +328,11 @@ const emit = defineEmits<{
       updatedModel: ModelPayload;
       originalName: string;
       typeKey: keyof ProviderModels;
-    },
+    }
   ): void;
   (
     e: "delete-model",
-    payload: { name: string; typeKey: keyof ProviderModels },
+    payload: { name: string; typeKey: keyof ProviderModels }
   ): void;
 }>();
 
@@ -354,27 +367,25 @@ const modelTypeMap: Record<keyof ProviderModels, string> = {
 // --- Event Handlers ---
 
 async function handleTestModel(modelName: string) {
-  // 1. 立即创建一个 promise通知，并显示加载状态
+  const fullModelId = `${props.providerKey}/${modelName}`;
+
   const notification = push.promise({
     title: "正在测试模型...",
-    message: `正在向 ${modelName} 发送请求...`,
+    message: `正在向 ${fullModelId} 发送请求...`,
   });
 
   try {
-    // 2. 调用异步 API
     const result = await generateText({
-      model: modelName,
+      model: fullModelId,
       prompt: "你好，请用一句话介绍一下你自己。",
     });
 
-    // 3. 如果成功，解析通知并显示成功消息
     notification.resolve({
       title: "测试成功!",
-      message: result.text, // 从结果中提取文本
+      message: result.text,
     });
   } catch (error) {
     console.error("模型测试失败:", error);
-    // 4. 如果失败，拒绝通知并显示错误消息
     notification.reject({
       title: "测试失败",
       message: (error as Error).message || "发生未知错误。",
@@ -463,10 +474,9 @@ function handleDelete() {
 watch(
   () => editingModel.value?.typeKey,
   (newType) => {
-    // 当在“添加”模式下切换模型类型时，更新 isChat 状态
     if (editingModel.value && !isEditing.value) {
       editingModel.value.isChat = newType === "chat";
     }
-  },
+  }
 );
 </script>

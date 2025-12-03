@@ -1,4 +1,3 @@
-// src/features/UI/UI.store.ts
 import { defineStore } from "pinia";
 import {
   ref,
@@ -10,10 +9,13 @@ import {
   type Component,
 } from "vue";
 import {
-  WebviewWindow,
   getCurrentWebviewWindow,
+  WebviewWindow,
 } from "@tauri-apps/api/webviewWindow";
-import { useFileSystemStore } from "../FileSystem/FileSystem.store";
+import {
+  useFileSystemStore,
+  VirtualFile,
+} from "../FileSystem/FileSystem.store";
 
 import { Cpu, ClipboardList, Key, Server, Settings2 } from "lucide-vue-next";
 import ProcessPanel from "../ProcessManager/ProcessPanel.vue";
@@ -53,7 +55,7 @@ export const useUIStore = defineStore("UI", () => {
   const uiState: Ref<UIState> = ref({
     openedFiles: [],
     activeFile: null,
-    activeCharacter: null,
+    activeCharacter: null, // 当前选中的角色上下文
     isFileSidebarOpen: true,
     customViews: [],
     subWindows: new Map(),
@@ -67,6 +69,11 @@ export const useUIStore = defineStore("UI", () => {
     customSidebarIds: [],
   });
 
+  // --- 新增: 自定义/内置组件映射 ---
+  // key: 完整路径 (例如 "$character" 或 "file.json")
+  // value: Vue Component
+  const customComponents = shallowRef<Record<string, Component>>({});
+
   const isSingle = computed(() => uiState.value.windowMode === "single");
 
   // --- Sidebar & Bottom Bar Config ---
@@ -75,7 +82,7 @@ export const useUIStore = defineStore("UI", () => {
       id: "manifest-config",
       name: "角色配置",
       icon: Settings2,
-      component: ManifestPanel,
+      component: markRaw(ManifestPanel),
     },
     {
       id: "process-manager",
@@ -104,7 +111,6 @@ export const useUIStore = defineStore("UI", () => {
   ]);
 
   const addSidebarItem = (item: BottomBarItem) => {
-    // 避免重复添加
     const existingIndex = bottomBarItems.value.findIndex(
       (i) => i.id === item.id
     );
@@ -121,6 +127,17 @@ export const useUIStore = defineStore("UI", () => {
     uiState.value.customSidebarIds = ids;
   };
 
+  /**
+   * 注册自定义组件到特定路径
+   * 允许注册以 $ 开头的虚拟路径组件
+   */
+  const registerComponent = (path: string, component: Component) => {
+    customComponents.value = {
+      ...customComponents.value,
+      [path]: markRaw(component),
+    };
+  };
+
   const toggleFileSidebar = (isOpen?: boolean) => {
     if (typeof isOpen === "boolean") {
       uiState.value.isFileSidebarOpen = isOpen;
@@ -134,7 +151,7 @@ export const useUIStore = defineStore("UI", () => {
       uiState.value.isRightSidebarOpen = !uiState.value.isRightSidebarOpen;
       return;
     }
-    // 如果已经在该 ID 打开，则关闭；否则切换到该 ID 并打开
+
     if (
       uiState.value.isRightSidebarOpen &&
       uiState.value.activeRightPanelId === id
@@ -155,10 +172,20 @@ export const useUIStore = defineStore("UI", () => {
 
   // --- File Logic ---
   const openFile = (path: string) => {
-    if (!fsStore.getNodeByPath(fsStore.fileStructure, path)) {
-      console.warn(`[VFS UI] Attempted to open non-existent file: ${path}`);
-      return;
+    // 逻辑修改：如果路径以 $ 开头，视为内置虚拟组件，跳过文件系统检查
+    const isInternalComponent = path.startsWith("$");
+
+    // 只有非内置组件才检查文件系统
+    if (!isInternalComponent) {
+      const node = fsStore.resolvePath(path);
+      if (!node || !(node instanceof VirtualFile)) {
+        console.warn(
+          `[VFS UI] Attempted to open non-existent file or directory: ${path}`
+        );
+        return;
+      }
     }
+
     if (!uiState.value.openedFiles.includes(path)) {
       uiState.value.openedFiles.push(path);
     }
@@ -182,7 +209,6 @@ export const useUIStore = defineStore("UI", () => {
     uiState.value.activeFile = path;
   };
 
-  // [NEW] 设置当前选中的角色
   const setActiveCharacter = (charName: string | null) => {
     uiState.value.activeCharacter = charName;
   };
@@ -195,7 +221,7 @@ export const useUIStore = defineStore("UI", () => {
         JSON.stringify({
           openedFiles: uiState.value.openedFiles,
           activeFile: uiState.value.activeFile,
-          activeCharacter: uiState.value.activeCharacter, // 持久化
+          activeCharacter: uiState.value.activeCharacter,
           isFileSidebarOpen: uiState.value.isFileSidebarOpen,
         })
       );
@@ -232,13 +258,19 @@ export const useUIStore = defineStore("UI", () => {
 
   const init = async () => {
     if (uiState.value.isInitialized) return;
-    uiState.value.currentWindowLabel = getCurrentWebviewWindow().label;
+    try {
+      uiState.value.currentWindowLabel = getCurrentWebviewWindow().label;
+    } catch (e) {
+      console.warn("Not running in Tauri window context");
+    }
     restoreState();
     uiState.value.isInitialized = true;
   };
 
   return {
     uiState,
+    customComponents, // 导出 customComponents
+    registerComponent, // 导出注册方法
     bottomBarItems,
     addSidebarItem,
     setSidebarContainers,

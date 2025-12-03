@@ -3,9 +3,10 @@
 import { ref, computed } from "vue";
 import {
   useFileSystemStore,
-  isFolderNode,
+  VirtualFolder,
+  VirtualFile,
 } from "@/features/FileSystem/FileSystem.store";
-import { DEFAULT, EMPTY_FOLDER } from "@/features/FileSystem/commands";
+import { useUIStore } from "@/features/UI/UI.store";
 import {
   Dialog,
   DialogContent,
@@ -21,18 +22,53 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Plus, Settings2, User } from "lucide-vue-next";
 import defaultCover from "@/assets/default.jpg";
-import { useUIStore } from "@/features/UI/UI.store";
-import { useInlineResources } from "@/schema/manifest/composables/useInlineResources";
 import { newManifest } from "@/schema/manifest/manifest.ts";
+import urlJoin from "url-join";
 
 const fsStore = useFileSystemStore();
 const uiStore = useUIStore();
 
+// --- 数据模型 ---
+type CharacterItem = {
+  name: string;
+  path: string;
+  avatarUrl: string;
+};
+
 // --- 数据获取 ---
-const characters = computed(() => {
-  const charRoot = fsStore.fileStructure["character"];
-  if (!charRoot || !isFolderNode(charRoot)) return [];
-  return Object.keys(charRoot).filter((key) => isFolderNode(charRoot[key]));
+const characters = computed<CharacterItem[]>(() => {
+  // 1. 获取 character 根目录
+  const charRoot = fsStore.root.resolve("character");
+  if (!charRoot || !(charRoot instanceof VirtualFolder)) return [];
+
+  const list: CharacterItem[] = [];
+
+  // 2. 遍历子文件夹
+  for (const [name, node] of charRoot.children.entries()) {
+    if (node instanceof VirtualFolder) {
+      let avatarUrl = defaultCover;
+
+      // 3. 查找头像 (Avatar.*)
+      // 注意：这里不使用 useInlineResources，因为在循环中使用 hook 开销较大且难以管理
+      // 直接遍历子节点查找符合命名规则的文件
+      for (const [childName, childNode] of node.children.entries()) {
+        if (
+          childNode instanceof VirtualFile &&
+          childName.match(/^Avatar\.(png|jpg|jpeg|webp|gif)$/i)
+        ) {
+          avatarUrl = childNode.url; // 利用 VirtualNode 的 getter
+          break;
+        }
+      }
+
+      list.push({
+        name,
+        path: node.path,
+        avatarUrl,
+      });
+    }
+  }
+  return list;
 });
 
 // --- 新建角色逻辑 ---
@@ -43,82 +79,107 @@ const isCreating = ref(false);
 const handleCreateCharacter = async () => {
   const name = newCharacterName.value.trim();
   if (!name) return;
-  if (characters.value.includes(name)) {
+
+  // 检查名称重复
+  const charRoot = fsStore.root.resolve("character");
+  if (charRoot instanceof VirtualFolder && charRoot.children.has(name)) {
     alert("角色名称已存在");
     return;
   }
 
   isCreating.value = true;
   try {
-    const charRootProxy = fsStore.fs["character"] as any;
-    charRootProxy[name] = new DEFAULT(EMPTY_FOLDER);
-    await Promise.all(fsStore.tasks);
-    fsStore.tasks = [];
-
-    const charProxy = charRootProxy[name] as any;
-    const folders = ["character", "chat", "template", "lorebook", "preset"];
-    for (const folder of folders) {
-      charProxy[folder] = new DEFAULT(EMPTY_FOLDER);
+    if (!(charRoot instanceof VirtualFolder)) {
+      throw new Error("Character root directory missing");
     }
-    await Promise.all(fsStore.tasks);
-    fsStore.tasks = [];
 
-    await charProxy["character"].createTypedFile(name, "character", false);
-    charProxy["manifest.[manifest].json"] = newManifest();
+    // 1. 创建角色文件夹
+    const charFolder = await charRoot.createDir(name);
+
+    // 2. 创建子文件夹结构
+    const subFolders = ["chat", "template", "lorebook", "preset"];
+    for (const folder of subFolders) {
+      await charFolder.createDir(folder);
+    }
+
+    // 3. 创建角色定义文件 (typed file)
+    // 根据 VirtualFolder.createTypedFile 签名: (baseName, semanticType, withTemplate)
+    await charFolder.createTypedFile(name, "character", true);
+
+    // 4. 创建 Manifest 文件
+    // 直接写入内容
+    await charFolder.createFile("manifest.[manifest].json", newManifest());
 
     isCreateDialogOpen.value = false;
     newCharacterName.value = "";
   } catch (e) {
     console.error("创建角色失败", e);
+    alert("创建失败: " + (e as Error).message);
   } finally {
     isCreating.value = false;
   }
 };
 
 // --- 交互逻辑 ---
-const handleCardClick = async (charName: string) => {
-  const charPath = `character/${charName}`;
-  const chatPath = `${charPath}/chat`;
-  const templatePath = `${charPath}/template`;
 
-  // 设置选中的角色
+/**
+ * 点击卡片：进入聊天界面
+ */
+const handleCardClick = async (char: CharacterItem) => {
+  const charName = char.name;
+  const charPath = char.path;
+
+  // 1. 设置 UI 状态
   uiStore.setActiveCharacter(charName);
 
-  const chatNode = fsStore.getNodeByPath(fsStore.fileStructure, chatPath);
+  // 2. 寻找最近的聊天记录或创建新的
+  const chatFolderPath = urlJoin(charPath, "chat");
+  const chatNode = fsStore.resolvePath(chatFolderPath);
+
   let targetFile = "";
 
-  if (chatNode && isFolderNode(chatNode)) {
-    const files = Object.keys(chatNode).filter((f) => f.endsWith(".json"));
-    if (files.length > 0) {
-      targetFile = `${chatPath}/${files[0]}`;
+  // 尝试在 chat 目录下找文件
+  if (chatNode instanceof VirtualFolder) {
+    // 寻找任意 .json 文件作为最近对话
+    for (const [fileName, node] of chatNode.children) {
+      if (node instanceof VirtualFile && fileName.endsWith(".json")) {
+        targetFile = node.path;
+        break;
+      }
     }
   }
 
+  // 如果没有找到对话文件，初始化默认环境
   if (!targetFile) {
     try {
-      const charProxy = fsStore.fs["character"][charName] as any;
-      if (
-        !isFolderNode(fsStore.getNodeByPath(fsStore.fileStructure, chatPath))
-      ) {
-        charProxy["chat"] = new DEFAULT(EMPTY_FOLDER);
-      }
-      if (
-        !isFolderNode(
-          fsStore.getNodeByPath(fsStore.fileStructure, templatePath)
-        )
-      ) {
-        charProxy["template"] = new DEFAULT(EMPTY_FOLDER);
-      }
-      await Promise.all(fsStore.tasks);
-      fsStore.tasks = [];
+      // 确保目录存在
+      let charFolder = fsStore.resolvePath(charPath) as VirtualFolder;
+      if (!charFolder) return; // 理论上不应该发生
 
-      const chatProxy = charProxy["chat"];
-      await chatProxy.createTypedFile(charName, "chat", false);
-      const tplProxy = charProxy["template"];
-      await tplProxy.createTypedFile("template", "chat", false);
-      await Promise.all(fsStore.tasks);
+      let chatFolder = charFolder.children.get("chat");
+      if (!(chatFolder instanceof VirtualFolder)) {
+        chatFolder = await charFolder.createDir("chat");
+      }
 
-      targetFile = `${chatPath}/${charName}.[chat].json`;
+      let templateFolder = charFolder.children.get("template");
+      if (!(templateFolder instanceof VirtualFolder)) {
+        templateFolder = await charFolder.createDir("template");
+      }
+
+      // 创建默认聊天文件和模板
+      // 注意：VirtualFolder 实例方法调用
+      const newChatFile = await (chatFolder as VirtualFolder).createTypedFile(
+        charName,
+        "chat",
+        true
+      );
+      await (templateFolder as VirtualFolder).createTypedFile(
+        "template",
+        "chat",
+        true
+      );
+
+      targetFile = newChatFile.path;
     } catch (e) {
       console.error("自动创建对话资源失败", e);
       return;
@@ -130,23 +191,46 @@ const handleCardClick = async (charName: string) => {
   }
 };
 
-const handleEditClick = (e: Event, charName: string) => {
+/**
+ * 点击设置按钮：打开配置侧边栏
+ */
+const handleEditClick = (e: Event, char: CharacterItem) => {
   e.stopPropagation();
-  const charPath = `character/${charName}`;
 
-  // 1. 设置被选中的角色到 uiStore
-  uiStore.setActiveCharacter(charName);
-  // 2. 将 activeFile 指向角色目录（可选，取决于 ManifestPanel 的降级策略，但这里主要是为了语义正确）
-  uiStore.setActiveFile(charPath);
+  // 1. 设置 activeCharacter，这样 ManifestPanel 里的 useResources 就能根据上下文工作
+  uiStore.setActiveCharacter(char.name);
 
-  // 3. 打开指定的侧栏面板
+  // 2. 设置 activeFile。
+  // 为了让 ManifestPanel 正确加载，我们需要 activeFile 指向角色目录下的某个文件，
+  // 或者 ManifestPanel 的逻辑能处理目录。
+  // 根据 useResources 的逻辑：
+  // const parentDir = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+  // 所以我们可以将 activeFile 设置为该角色下的 manifest 文件，或者主角色卡文件。
+
+  // 尝试寻找 manifest 文件
+  const charFolder = fsStore.resolvePath(char.path);
+  if (charFolder instanceof VirtualFolder) {
+    let manifestPath = "";
+    for (const [name, node] of charFolder.children) {
+      if (name.includes("[manifest]") || name === "manifest.json") {
+        manifestPath = node.path;
+        break;
+      }
+    }
+
+    // 如果找到了 manifest，将其设为 activeFile，这样 useResources 就能直接定位
+    if (manifestPath) {
+      uiStore.setActiveFile(manifestPath);
+    } else {
+      // 否则设为角色目录路径（依赖后续逻辑处理目录路径的情况，或者指向一个假文件）
+      // 这里的妥协方案：指向角色目录，useResources 需要能处理 activeFilePath 是目录的情况，
+      // 或者我们将 activeFile 指向角色卡文件
+      uiStore.setActiveFile(urlJoin(char.path, "manifest.[manifest].json"));
+    }
+  }
+
+  // 3. 打开侧边栏
   uiStore.toggleRightSidebar("manifest-config");
-};
-
-const getCoverUrl = (charName: string) => {
-  const path = ref<string>(`character/${charName}`);
-  const url = useInlineResources(path).avatar.src;
-  return url;
 };
 </script>
 
@@ -211,7 +295,7 @@ const getCoverUrl = (charName: string) => {
       <!-- 角色卡片列表 -->
       <Card
         v-for="char in characters"
-        :key="char"
+        :key="char.name"
         class="group relative overflow-hidden rounded-xl border-border bg-card transition-all hover:shadow-md cursor-pointer"
         @click="handleCardClick(char)"
       >
@@ -220,12 +304,10 @@ const getCoverUrl = (charName: string) => {
             <!-- 图片层 -->
             <div class="h-full w-full overflow-hidden bg-muted">
               <img
-                :src="getCoverUrl(char).value"
+                :src="char.avatarUrl"
                 class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                 alt="Cover"
-                @error="
-                  (e) => (e.target as HTMLImageElement).src = defaultCover
-                "
+                @error="(e) => (e.target as HTMLImageElement).src = defaultCover"
               />
             </div>
 
@@ -239,7 +321,7 @@ const getCoverUrl = (charName: string) => {
               <div class="flex items-center gap-2">
                 <User class="h-4 w-4 text-white/70" />
                 <h3 class="truncate text-lg font-bold text-white shadow-sm">
-                  {{ char }}
+                  {{ char.name }}
                 </h3>
               </div>
             </div>

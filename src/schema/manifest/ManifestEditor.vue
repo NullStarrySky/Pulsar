@@ -1,15 +1,11 @@
-<!-- src/schema/manifest/ManifestEditor.vue -->
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import type {
-  ManifestContent,
-  BackgroundMode,
-} from "@/schema/manifest/manifest.types";
+import { computed, ref, toRef } from "vue";
+import type { BackgroundMode } from "@/schema/manifest/manifest.types";
+import { useResources } from "@/schema/manifest/composables/useResources";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch"; // 使用 Switch 更直观
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,305 +15,340 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import {
-  Plus,
-  Trash2,
-  Image as ImageIcon,
-  Box,
+  RefreshCcw,
   Layers,
   BookOpen,
   Settings2,
+  Image as ImageIcon,
+  Box,
+  Plus,
+  Trash2,
+  FileType,
+  Globe,
+  FolderOpen,
+  Link as LinkIcon,
 } from "lucide-vue-next";
 
 const props = defineProps<{
-  manifest: ManifestContent;
-  inlineResources: Record<string, string[]>;
-  allResources: Record<string, any[]>; // 暂时未使用，可用于下拉选择
+  path: string;
 }>();
 
-const emit = defineEmits<{
-  (e: "toggle", type: "character" | "lorebook" | "preset", path: string): void;
-  (e: "update", newManifest: ManifestContent): void;
-}>();
+const { manifestContent, availableResources, updateManifest, toggleSelection } =
+  useResources(toRef(props, "path"));
 
 const activeTab = ref("resources");
+const manifest = computed(() => manifestContent.value);
 
-// --- 背景修改逻辑 ---
+// --- Background Logic ---
 const bgModes: { value: BackgroundMode; label: string }[] = [
   { value: "cover", label: "填充 (Cover)" },
   { value: "contain", label: "适应 (Contain)" },
   { value: "tile", label: "平铺 (Tile)" },
-  { value: "center", label: "居中 (Center)" },
-  { value: "stretch", label: "拉伸 (Stretch)" },
 ];
 
 const updateBackground = (key: "path" | "mode", value: string) => {
-  const newManifest = { ...props.manifest };
-  if (!newManifest.background) {
+  if (!manifest.value) return;
+  const newManifest = { ...manifest.value };
+  if (!newManifest.background)
     newManifest.background = { path: "", mode: "cover" };
-  }
-  // @ts-ignore - 简单的类型规避，实际项目中建议定义更严谨的接口
+  // @ts-ignore
   newManifest.background[key] = value;
-  emit("update", newManifest);
+  updateManifest(newManifest);
 };
 
-// --- 组件修改逻辑 ---
-const componentList = computed(() => {
-  return Object.entries(props.manifest.customComponents || {}).map(
-    ([tag, path]) => ({ tag, path })
-  );
-});
+// --- Component Logic ---
+const componentList = computed(() =>
+  Object.entries(manifest.value?.customComponents || {}).map(([tag, path]) => ({
+    tag,
+    path,
+  }))
+);
 
 const addComponent = () => {
-  const newManifest = { ...props.manifest };
+  if (!manifest.value) return;
+  const newManifest = { ...manifest.value };
   if (!newManifest.customComponents) newManifest.customComponents = {};
-  const newKey = `new-tag-${Date.now()}`;
-  newManifest.customComponents[newKey] = "";
-  emit("update", newManifest);
+  newManifest.customComponents[`new-tag-${Date.now()}`] = "";
+  updateManifest(newManifest);
 };
 
-const updateComponentKey = (oldKey: string, newKey: string) => {
-  if (oldKey === newKey) return;
-  const newManifest = { ...props.manifest };
-  const components = { ...(newManifest.customComponents || {}) };
-  const value = components[oldKey];
-  delete components[oldKey];
-  components[newKey] = value;
-  newManifest.customComponents = components;
-  emit("update", newManifest);
+const updateComponent = (oldTag: string, newTag: string, newPath: string) => {
+  if (!manifest.value) return;
+  const newManifest = { ...manifest.value };
+  const comps = { ...(newManifest.customComponents || {}) };
+  if (oldTag !== newTag) delete comps[oldTag];
+  comps[newTag] = newPath;
+  newManifest.customComponents = comps;
+  updateManifest(newManifest);
 };
 
-const updateComponentValue = (key: string, newValue: string) => {
-  const newManifest = { ...props.manifest };
-  if (!newManifest.customComponents) newManifest.customComponents = {};
-  newManifest.customComponents[key] = newValue;
-  emit("update", newManifest);
-};
-
-const removeComponent = (key: string) => {
-  const newManifest = { ...props.manifest };
+const removeComponent = (tag: string) => {
+  if (!manifest.value) return;
+  const newManifest = { ...manifest.value };
   if (newManifest.customComponents) {
-    delete newManifest.customComponents[key];
-    emit("update", newManifest);
+    delete newManifest.customComponents[tag];
+    updateManifest(newManifest);
   }
 };
 
-const resourceTypes = [
-  { id: "character", label: "角色", icon: Layers },
-  { id: "lorebook", label: "世界书", icon: BookOpen },
-  { id: "preset", label: "预设", icon: Settings2 },
+const tabs = [
+  { id: "character", label: "角色", icon: Layers, color: "text-blue-500" },
+  { id: "lorebook", label: "世界书", icon: BookOpen, color: "text-amber-500" },
+  { id: "preset", label: "预设", icon: Settings2, color: "text-slate-500" },
 ];
+
+const getSourceIcon = (source: string) => {
+  switch (source) {
+    case "global":
+      return Globe;
+    case "local":
+      return FolderOpen;
+    default:
+      return LinkIcon;
+  }
+};
+
+const getSourceLabel = (source: string) => {
+  switch (source) {
+    case "global":
+      return "Global";
+    case "local":
+      return "Local";
+    default:
+      return "External";
+  }
+};
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-background text-foreground">
-    <!-- Header -->
-    <div class="px-4 py-3 flex flex-col gap-1 border-b bg-card/50">
-      <Label class="text-xs text-muted-foreground font-normal">当前环境</Label>
-      <div class="text-sm font-semibold truncate" :title="manifest.name">
-        {{ manifest.name }}
-      </div>
+  <div class="flex flex-col h-full bg-background/50 text-foreground">
+    <!-- Loading -->
+    <div
+      v-if="!manifest"
+      class="flex-1 flex items-center justify-center text-muted-foreground"
+    >
+      <RefreshCcw class="w-5 h-5 animate-spin mr-2" />
+      <span class="text-xs">加载配置中...</span>
     </div>
 
-    <!-- Main Content -->
-    <Tabs v-model="activeTab" class="flex-1 flex flex-col overflow-hidden">
-      <div class="px-4 py-2 border-b">
-        <TabsList class="grid w-full grid-cols-2">
-          <TabsTrigger value="resources">资源管理</TabsTrigger>
-          <TabsTrigger value="appearance">视觉扩展</TabsTrigger>
-        </TabsList>
+    <template v-else>
+      <!-- Header -->
+      <div
+        class="px-4 py-3 border-b flex items-center justify-between bg-card/50 backdrop-blur-sm"
+      >
+        <div class="space-y-0.5">
+          <h3 class="text-sm font-semibold">{{ manifest.name }}</h3>
+          <p class="text-[10px] text-muted-foreground truncate max-w-[200px]">
+            {{ manifest.id }}
+          </p>
+        </div>
+        <Badge variant="outline" class="text-[10px]"
+          >v{{ new Date(manifest.last_modified).toLocaleDateString() }}</Badge
+        >
       </div>
 
-      <ScrollArea class="flex-1">
-        <div class="p-4 pb-10">
-          <!-- Tab 1: 资源选择 -->
-          <TabsContent
-            value="resources"
-            class="mt-0 space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300"
-          >
-            <div v-for="t in resourceTypes" :key="t.id" class="space-y-2">
-              <div class="flex items-center gap-2 mb-2">
-                <component :is="t.icon" class="w-4 h-4 text-muted-foreground" />
-                <h4 class="text-sm font-medium">{{ t.label }}</h4>
-              </div>
+      <Tabs v-model="activeTab" class="flex-1 flex flex-col overflow-hidden">
+        <div class="px-4 pt-2">
+          <TabsList class="w-full grid grid-cols-2">
+            <TabsTrigger value="resources">资源管理</TabsTrigger>
+            <TabsTrigger value="appearance">视觉 & 组件</TabsTrigger>
+          </TabsList>
+        </div>
 
-              <div class="space-y-1">
-                <!-- Inline Resources (Read Only) -->
+        <ScrollArea class="flex-1">
+          <div class="p-4 space-y-6">
+            <!-- Tab: Resources -->
+            <TabsContent
+              value="resources"
+              class="mt-0 space-y-6 focus-visible:outline-none animate-in slide-in-from-bottom-2 duration-300"
+            >
+              <div v-for="tab in tabs" :key="tab.id" class="space-y-3">
                 <div
-                  v-for="path in inlineResources[t.id]"
-                  :key="path"
-                  class="flex items-center space-x-2 px-2 py-1.5 rounded-md bg-muted/50 opacity-70 cursor-not-allowed"
+                  class="flex items-center justify-between pb-1 border-b border-border/50"
                 >
-                  <Checkbox
-                    :checked="true"
-                    disabled
-                    class="data-[state=checked]:bg-muted-foreground"
-                  />
-                  <span
-                    class="text-xs truncate text-muted-foreground flex-1"
-                    :title="path"
-                  >
-                    {{ path.split("/").pop() }}
-                    <span class="text-[10px] ml-1">(内联)</span>
+                  <div class="flex items-center gap-2">
+                    <component :is="tab.icon" :class="['w-4 h-4', tab.color]" />
+                    <span class="text-sm font-medium">{{ tab.label }}</span>
+                  </div>
+                  <span class="text-[10px] text-muted-foreground">
+                    {{
+                      availableResources[tab.id as "character"].filter(
+                        (r) => r.selected
+                      ).length
+                    }}
+                    启用
                   </span>
                 </div>
 
-                <!-- Selected Resources -->
-                <div
-                  v-for="path in manifest.selection[t.id as 'character']"
-                  :key="path"
-                  class="flex items-center space-x-2 px-2 py-1.5 rounded-md hover:bg-muted/50 transition-colors group"
-                >
-                  <Checkbox
-                    :id="`${t.id}-${path}`"
-                    :checked="true"
-                    @update:checked="() => emit('toggle', t.id as any, path)"
-                  />
-                  <Label
-                    :for="`${t.id}-${path}`"
-                    class="text-xs truncate flex-1 cursor-pointer font-normal"
+                <div class="grid gap-2">
+                  <div
+                    v-if="availableResources[tab.id as 'character'].length === 0"
+                    class="text-center py-4 text-xs text-muted-foreground bg-muted/20 rounded-md border border-dashed"
                   >
-                    {{ path.split("/").pop() }}
-                  </Label>
+                    未发现相关资源
+                  </div>
+
+                  <div
+                    v-for="item in availableResources[tab.id as 'character']"
+                    :key="item.path"
+                    class="flex items-center gap-3 p-2.5 rounded-md border transition-all"
+                    :class="
+                      item.selected
+                        ? 'bg-accent/40 border-accent/50'
+                        : 'bg-card border-transparent hover:bg-muted/50'
+                    "
+                  >
+                    <!-- Icon based on source -->
+                    <div
+                      class="shrink-0 text-muted-foreground"
+                      :title="getSourceLabel(item.source)"
+                    >
+                      <component
+                        :is="getSourceIcon(item.source)"
+                        class="w-3.5 h-3.5"
+                      />
+                    </div>
+
+                    <div class="flex-1 min-w-0 flex flex-col gap-0.5">
+                      <span
+                        class="text-xs font-medium truncate"
+                        :class="{
+                          'text-foreground': item.selected,
+                          'text-muted-foreground': !item.selected,
+                        }"
+                      >
+                        {{ item.name }}
+                      </span>
+                      <span
+                        class="text-[9px] text-muted-foreground/60 truncate font-mono"
+                        :title="item.path"
+                      >
+                        {{ item.source === "local" ? "./" : ""
+                        }}{{ item.path.split("/").pop() }}
+                      </span>
+                    </div>
+
+                    <Switch
+                      :modelValue="item.selected"
+                      @update:modelValue="(v) => toggleSelection(tab.id as any, item.path, v)"
+                      class="scale-75 origin-right"
+                    />
+                  </div>
                 </div>
-
-                <!-- Add Button Placeholder -->
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="w-full justify-start h-8 px-2 text-muted-foreground hover:text-primary"
-                >
-                  <Plus class="w-3.5 h-3.5 mr-2" />
-                  <span class="text-xs">添加{{ t.label }}</span>
-                </Button>
               </div>
-            </div>
-          </TabsContent>
+            </TabsContent>
 
-          <!-- Tab 2: 视觉与扩展 -->
-          <TabsContent
-            value="appearance"
-            class="mt-0 space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300"
-          >
-            <!-- 背景设置 -->
-            <section class="space-y-3">
-              <div class="flex items-center gap-2">
-                <div class="p-1 rounded-md bg-muted">
-                  <ImageIcon class="w-3.5 h-3.5 text-foreground" />
+            <!-- Tab: Appearance (Keeping existing logic for Avatar/BG) -->
+            <TabsContent
+              value="appearance"
+              class="mt-0 space-y-6 focus-visible:outline-none animate-in slide-in-from-bottom-2 duration-300"
+            >
+              <!-- Same as before -->
+              <section class="space-y-3">
+                <div class="flex items-center gap-2">
+                  <div class="p-1.5 bg-primary/10 rounded-md">
+                    <ImageIcon class="w-4 h-4 text-primary" />
+                  </div>
+                  <h4 class="text-sm font-medium">背景设置</h4>
                 </div>
-                <h4 class="text-sm font-medium">背景设置</h4>
-              </div>
-
-              <div class="grid gap-3 p-3 border rounded-lg bg-card/30">
-                <div class="grid gap-1.5">
-                  <Label class="text-xs text-muted-foreground">资源路径</Label>
-                  <div class="flex gap-2">
+                <div class="p-3 bg-muted/30 rounded-lg border space-y-3">
+                  <div class="space-y-1.5">
+                    <Label class="text-xs">资源路径</Label>
                     <Input
-                      :model-value="manifest.background?.path || ''"
+                      :model-value="manifest.background?.path"
                       @update:model-value="
                         (v) => updateBackground('path', String(v))
                       "
-                      placeholder="路径..."
-                      class="h-8 text-xs bg-background"
+                      class="h-8 text-xs font-mono"
+                      placeholder="assets/background.jpg"
                     />
-                    <!-- 可选：文件选择按钮占位 -->
-                    <!-- <Button size="icon" variant="outline" class="h-8 w-8 shrink-0"><FolderOpen class="w-3.5 h-3.5" /></Button> -->
                   </div>
-                </div>
-
-                <div class="grid gap-1.5">
-                  <Label class="text-xs text-muted-foreground">显示模式</Label>
-                  <Select
-                    :model-value="manifest.background?.mode || 'cover'"
-                    @update:model-value="
-                      (v) => updateBackground('mode', String(v))
-                    "
-                  >
-                    <SelectTrigger class="h-8 text-xs bg-background">
-                      <SelectValue placeholder="选择模式" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem
-                        v-for="m in bgModes"
-                        :key="m.value"
-                        :value="m.value"
-                      >
-                        {{ m.label }}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </section>
-
-            <Separator />
-
-            <!-- 自定义组件 -->
-            <section class="space-y-3">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <div class="p-1 rounded-md bg-muted">
-                    <Box class="w-3.5 h-3.5 text-foreground" />
-                  </div>
-                  <h4 class="text-sm font-medium">组件映射</h4>
-                </div>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  class="h-6 w-6"
-                  @click="addComponent"
-                  title="添加组件"
-                >
-                  <Plus class="w-4 h-4" />
-                </Button>
-              </div>
-
-              <div class="space-y-2">
-                <div
-                  v-if="componentList.length === 0"
-                  class="flex flex-col items-center justify-center py-6 border border-dashed rounded-lg text-muted-foreground bg-muted/20"
-                >
-                  <Box class="w-8 h-8 mb-2 opacity-50" />
-                  <span class="text-xs">暂无注册组件</span>
-                </div>
-
-                <div
-                  v-for="(comp, idx) in componentList"
-                  :key="idx"
-                  class="group flex gap-2 items-start"
-                >
-                  <div class="flex-1 grid gap-1.5">
-                    <Input
-                      :model-value="comp.tag"
-                      @change="(e: Event) => updateComponentKey(comp.tag, (e.target as HTMLInputElement).value)"
-                      placeholder="Tag"
-                      class="h-7 text-xs font-mono bg-background"
-                      title="标签名"
-                    />
-                    <Input
-                      :model-value="comp.path"
+                  <div class="space-y-1.5">
+                    <Label class="text-xs">填充模式</Label>
+                    <Select
+                      :model-value="manifest.background?.mode || 'cover'"
                       @update:model-value="
-                        (v) => updateComponentValue(comp.tag, String(v))
+                        (v) => updateBackground('mode', String(v))
                       "
-                      placeholder="Path"
-                      class="h-7 text-xs bg-background"
-                      title="组件路径"
-                    />
+                    >
+                      <SelectTrigger class="h-8 text-xs"
+                        ><SelectValue
+                      /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem
+                          v-for="m in bgModes"
+                          :key="m.value"
+                          :value="m.value"
+                          >{{ m.label }}</SelectItem
+                        >
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </section>
+              <Separator />
+              <section class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <div class="p-1.5 bg-purple-500/10 rounded-md">
+                      <Box class="w-4 h-4 text-purple-500" />
+                    </div>
+                    <h4 class="text-sm font-medium">组件映射</h4>
                   </div>
                   <Button
                     size="icon"
                     variant="ghost"
-                    class="h-7 w-7 mt-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                    @click="removeComponent(comp.tag)"
-                  >
-                    <Trash2 class="w-3.5 h-3.5" />
-                  </Button>
+                    class="h-6 w-6"
+                    @click="addComponent"
+                    ><Plus class="w-4 h-4"
+                  /></Button>
                 </div>
-              </div>
-            </section>
-          </TabsContent>
-        </div>
-      </ScrollArea>
-    </Tabs>
+                <div class="space-y-2">
+                  <div
+                    v-if="!componentList.length"
+                    class="text-center py-6 text-xs text-muted-foreground border border-dashed rounded-lg bg-muted/20"
+                  >
+                    暂无自定义组件
+                  </div>
+                  <div
+                    v-for="(comp, idx) in componentList"
+                    :key="idx"
+                    class="flex gap-2 items-start p-2 rounded-md bg-card border group hover:shadow-sm transition-all"
+                  >
+                    <div class="grid gap-2 flex-1">
+                      <div class="flex items-center gap-2">
+                        <FileType class="w-3 h-3 text-muted-foreground" />
+                        <Input
+                          :model-value="comp.tag"
+                          @change="(e: Event) => updateComponent(comp.tag, (e.target as any).value, comp.path)"
+                          class="h-6 text-[10px] font-mono border-0 bg-muted/50 focus-visible:ring-0 px-1"
+                        />
+                      </div>
+                      <Input
+                        :model-value="comp.path"
+                        @change="(e: Event) => updateComponent(comp.tag, comp.tag, (e.target as any).value)"
+                        class="h-7 text-xs"
+                        placeholder="Path to .vue / .js"
+                      />
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      class="h-6 w-6 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                      @click="removeComponent(comp.tag)"
+                    >
+                      <Trash2 class="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </section>
+            </TabsContent>
+          </div>
+        </ScrollArea>
+      </Tabs>
+    </template>
   </div>
 </template>
