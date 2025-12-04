@@ -16,12 +16,12 @@ import {
   Clipboard,
   FileText,
   Folder as FolderIcon,
-  Loader2, // 添加 loading 图标
+  Loader2,
 } from "lucide-vue-next";
 import join from "url-join";
 
 // Stores & Composables
-import { useFileSystemStore } from "@/features/FileSystem/FileSystem.store"; // 指向新的 Store
+import { useFileSystemStore } from "@/features/FileSystem/FileSystem.store";
 import { useUIStore } from "@/features/UI/UI.store";
 import { useFileTree } from "@/features/FileSystem/FileTree/composables/useFileTree";
 import { useFileOperations } from "@/features/FileSystem/FileTree/composables/useFileOperations";
@@ -64,36 +64,51 @@ const setInputRef = (el: any) => {
 };
 
 // Focus handling
-watch(editingNodeId, async (val) => {
+watch(editingNodeId, (val) => {
   if (val) {
-    await nextTick();
-    inputRef.value?.focus();
-    if (!val.startsWith("new:")) inputRef.value?.select();
+    setTimeout(() => {
+      const el = inputRef.value;
+      if (!el) return;
+
+      el.focus();
+
+      const text = el.value;
+      const lastDotIndex = text.lastIndexOf(".");
+
+      if (val.startsWith("new:") || lastDotIndex <= 0) {
+        el.select();
+      } else {
+        el.setSelectionRange(0, lastDotIndex);
+      }
+    }, 200);
   }
 });
 
 const handleFinishEdit = async () => {
   const id = editingNodeId.value;
+  if (!id) return;
+
   const name = newName.value.trim();
 
-  if (!id || !name) {
+  if (!name) {
     cancelEdit();
     return;
   }
 
   try {
     if (id.startsWith("new:")) {
-      const parts = id.split(":"); // new:file:/path/to/parent:timestamp
+      const parts = id.split(":");
       const type = parts[1] as "file" | "directory";
       const parentPath = parts[2];
       await ops.handleCreate(type, parentPath, name);
     } else {
-      // id 就是 path
-      await ops.handleRename(id, name);
+      const originalName = id.split("/").pop();
+      if (name !== originalName) {
+        await ops.handleRename(id, name);
+      }
     }
   } catch (error) {
     console.error("Operation failed:", error);
-    // 这里可以对接 Toast 提示
   } finally {
     cancelEdit();
   }
@@ -101,7 +116,6 @@ const handleFinishEdit = async () => {
 
 const startCreate = (type: "file" | "directory", parentPath: string) => {
   if (!expandedFolders.value.has(parentPath)) toggleExpand(parentPath);
-  // 使用 path 作为 key 的一部分，确保唯一性
   const uniqueId = `new:${type}:${parentPath}:${Date.now()}`;
   startEdit(uniqueId, true);
 };
@@ -152,54 +166,57 @@ const startCreate = (type: "file" | "directory", parentPath: string) => {
                   />
                 </div>
 
-                <!-- View Mode -->
-                <FileTreeItem
+                <!-- View Mode (Fix: 使用 div 包裹以确保 draggable 属性生效) -->
+                <div
                   v-else
-                  :item="item"
-                  :is-locked="store.lockedPaths.has(item.path)"
-                  :can-paste="!!ops.clipboard.value"
-                  class="file-tree-item"
-                  :data-path="item.path"
+                  class="w-full"
                   :draggable="true"
-                  @click="
-                    item.isFolder
-                      ? toggleExpand(item.path)
-                      : uiStore.openFile(item.path)
-                  "
-                  @dblclick="!item.isFolder && uiStore.openFile(item.path)"
+                  :data-path="item.path"
                   @dragstart.stop="dnd.handleDragStart($event, item.path)"
                   @dragend.stop="dnd.handleDragEnd"
                   @dragenter.stop="dnd.handleDragEnter($event, item.path)"
                   @dragleave.stop="dnd.handleDragLeave"
                   @dragover.prevent
                   @drop.stop="dnd.handleDrop($event, item.path)"
-                  @create-file="
-                    startCreate(
-                      'file',
+                >
+                  <FileTreeItem
+                    :item="item"
+                    :can-paste="!!ops.clipboard.value"
+                    class="file-tree-item"
+                    @click="
                       item.isFolder
-                        ? item.path
-                        : item.parentPath || props.rootPath
-                    )
-                  "
-                  @create-folder="
-                    startCreate(
-                      'directory',
-                      item.isFolder
-                        ? item.path
-                        : item.parentPath || props.rootPath
-                    )
-                  "
-                  @rename="startEdit(item.path)"
-                  @delete="ops.confirmTrash(item)"
-                  @permanent-delete="ops.confirmPermanentDelete(item)"
-                  @cut="ops.setClipboard(item.path, item.name, 'cut')"
-                  @copy="ops.setClipboard(item.path, item.name, 'copy')"
-                  @duplicate="ops.handleDuplicate(item.path)"
-                  @paste="ops.handlePaste(item.path)"
-                  @copy-path="
-                    (type) => ops.copyPathToClipboard(item.path, type)
-                  "
-                />
+                        ? toggleExpand(item.path)
+                        : uiStore.openFile(item.path)
+                    "
+                    @dblclick="!item.isFolder && uiStore.openFile(item.path)"
+                    @create-file="
+                      startCreate(
+                        'file',
+                        item.isFolder
+                          ? item.path
+                          : item.parentPath || props.rootPath
+                      )
+                    "
+                    @create-folder="
+                      startCreate(
+                        'directory',
+                        item.isFolder
+                          ? item.path
+                          : item.parentPath || props.rootPath
+                      )
+                    "
+                    @rename="startEdit(item.path)"
+                    @delete="ops.confirmTrash(item)"
+                    @permanent-delete="ops.confirmPermanentDelete(item)"
+                    @cut="ops.setClipboard(item.path, item.name, 'cut')"
+                    @copy="ops.setClipboard(item.path, item.name, 'copy')"
+                    @duplicate="ops.handleDuplicate(item.path)"
+                    @paste="ops.handlePaste(item.path)"
+                    @copy-path="
+                      (type) => ops.copyPathToClipboard(item.path, type)
+                    "
+                  />
+                </div>
               </li>
             </ul>
             <div
@@ -212,7 +229,7 @@ const startCreate = (type: "file" | "directory", parentPath: string) => {
           </div>
         </ContextMenuTrigger>
 
-        <!-- Global Context Menu (Right click on empty space) -->
+        <!-- Global Context Menu -->
         <ContextMenuContent class="w-56">
           <ContextMenuItem @select="startCreate('file', props.rootPath)">
             <Plus class="mr-2 h-4 w-4" />新建文件

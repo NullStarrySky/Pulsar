@@ -4,7 +4,7 @@ import LeftSidebar from "./LeftSidebar.vue";
 import FileSidebar from "./FileSidebar.vue";
 import BottomBar from "@/components/layout/BottomBar.vue";
 import Workbench from "./workbench/Workbench.vue";
-import { Files, PlugIcon, Settings, User } from "lucide-vue-next";
+import { Files, PlugIcon, Settings, User, FlaskConical } from "lucide-vue-next";
 import { useProcessManagerStore } from "@/features/ProcessManager/ProcessManager.store";
 import { onMounted } from "vue";
 
@@ -21,6 +21,7 @@ const topButtons = [
 ];
 
 const bottomButtons = [
+  { svg: FlaskConical, onClick: "$test", title: "testComponent" },
   {
     svg: PlugIcon,
     onClick: "modelConfig.[modelConfig].json",

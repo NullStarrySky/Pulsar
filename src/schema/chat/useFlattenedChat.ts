@@ -24,7 +24,7 @@ import {
   createMessageAlternative,
   createBranchAlternative,
   createMessageContainer,
-} from "./chat.factory";
+} from "./chat";
 
 export function useFlattenedChat(chatRef: MaybeRef<RootChat>) {
   // 1. 核心计算属性：压平聊天记录

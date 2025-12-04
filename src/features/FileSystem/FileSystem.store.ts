@@ -20,15 +20,15 @@ import { BaseDirectory, type FileInfo } from "@tauri-apps/plugin-fs";
 import { debounce } from "lodash-es";
 import urlJoin from "url-join";
 import { FSEventType, fsEmitter } from "./FileSystem.events";
-import { newSetting } from "@/schema/setting/setting";
-import { newModelConfig } from "@/schema/modelConfig/modelConfig";
 import type { Setting } from "@/schema/setting/setting.types";
 import type { ModelConfig } from "@/schema/modelConfig/modelConfig.types";
-import { SemanticType, SemanticTypeMap } from "@/schema/SemanticType";
+import {
+  SemanticType,
+  SemanticTypeMap,
+  createTypedFile,
+} from "@/schema/SemanticType";
 // 引入 Task Store
 import { useTaskStore } from "@/features/Task/Task.store";
-
-// ... (常量定义和辅助函数 checkLocked, getUniqueName 等保持不变) ...
 
 export const TRASH_DIR_PATH = "trash";
 const TRASH_MANIFEST_PATH = urlJoin(TRASH_DIR_PATH, "manifest.json");
@@ -41,12 +41,16 @@ export type TrashItem = {
   trashedAt: string;
 };
 
+// 递归结构类型定义
+export type FSStructure = {
+  [key: string]: FSStructure | (() => any | Promise<any>);
+};
+
 // --- 辅助函数 ---
 const isJsonFile = (path: string) => path.endsWith(".json");
 const isImageFile = (path: string) =>
   /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(path);
 const getUniqueName = (name: string, existingNames: Set<string>): string => {
-  // ... (保持原样)
   if (!existingNames.has(name)) return name;
   const parts = name.split(".");
   let ext = "";
@@ -70,17 +74,8 @@ const getUniqueName = (name: string, existingNames: Set<string>): string => {
   return newName;
 };
 
-const checkLocked = (path: string, operation: string) => {
-  const store = useFileSystemStore();
-  if (store.lockedPaths.has(path)) {
-    throw new Error(`Cannot ${operation} locked path: ${path}`);
-  }
-};
-
 /**
  * 核心集成逻辑：运行任务包装器
- * 如果传入了 signal，说明是递归调用或内部调用，直接执行操作。
- * 如果没有 signal，说明是顶层调用，创建 Task。
  */
 async function runAsTask<T>(
   name: string,
@@ -127,66 +122,12 @@ export abstract class VirtualNode {
   }
 
   abstract unload(): void;
-
-  // 修改：delete 接受可选 signal
   abstract delete(signal?: AbortSignal): Promise<void>;
   abstract rename(newName: string): Promise<void>;
-
-  // 修改：moveTo 接受可选 signal
-  async moveTo(
+  abstract moveTo(
     targetFolder: VirtualFolder,
     signal?: AbortSignal
-  ): Promise<void> {
-    // 移动操作通常很快（rename），除非跨分区（Tauri AppData 不太可能）。
-    // 这里也可以包一层 task，但如果是瞬间完成的，UI 会闪一下。
-    // 策略：如果操作本身很快，可以不强制包 Task，或者只在 signal 存在时检查。
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-
-    if (this.parent === targetFolder) return;
-    checkLocked(this.path, "move");
-
-    if (targetFolder.children.has(this.name)) {
-      throw new Error(`Destination already has a node named ${this.name}`);
-    }
-
-    const store = useFileSystemStore();
-    const oldPath = this.path;
-    const newPath = urlJoin(targetFolder.path, this.name);
-    const isDir = this instanceof VirtualFolder;
-
-    await fsRename(oldPath, newPath, {
-      oldPathBaseDir: BaseDirectory.AppData,
-      newPathBaseDir: BaseDirectory.AppData,
-    });
-
-    if (this.parent) {
-      this.parent.children.delete(this.name);
-    }
-    this.parent = targetFolder;
-    targetFolder.children.set(this.name, this);
-
-    if (!isDir) {
-      const content = store.contentCache.get(oldPath);
-      if (content !== undefined) {
-        store.contentCache.delete(oldPath);
-        store.contentCache.set(newPath, content);
-      }
-    } else {
-      for (const key of store.contentCache.keys()) {
-        if (key.startsWith(oldPath + "/")) {
-          // 这里简单做清除
-          store.contentCache.delete(key);
-        }
-      }
-    }
-
-    fsEmitter.emit(isDir ? FSEventType.DIR_MOVED : FSEventType.FILE_MOVED, {
-      oldPath,
-      newPath,
-    });
-  }
-
-  // 修改：copyTo 接受可选 signal
+  ): Promise<void>;
   abstract copyTo(
     targetFolder: VirtualFolder,
     signal?: AbortSignal
@@ -194,7 +135,6 @@ export abstract class VirtualNode {
 
   async moveToTrash(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    checkLocked(this.path, "trash");
 
     const store = useFileSystemStore();
     const trashedName = this.name;
@@ -221,7 +161,6 @@ export abstract class VirtualNode {
       this.parent.children.delete(this.name);
     }
 
-    // 清理缓存
     if (!isDir) {
       store.contentCache.delete(originalPath);
     } else {
@@ -240,7 +179,6 @@ export abstract class VirtualNode {
 }
 
 export class VirtualFile extends VirtualNode {
-  // ... (semanticType, extension, read, write, rename 保持不变)
   get semanticType(): SemanticType | "unknown" {
     const match = this.name.match(/\.\[(.*?)]\./);
     return (match ? match[1] : "unknown") as SemanticType | "unknown";
@@ -252,12 +190,10 @@ export class VirtualFile extends VirtualNode {
   }
 
   async read(force = false): Promise<any> {
-    // 读取通常不做 Task，除非特别大，这里保持原样
     const store = useFileSystemStore();
     if (!force && store.contentCache.has(this.path)) {
       return store.contentCache.get(this.path);
     }
-    // ... 原有逻辑 ...
     try {
       let content: any;
       if (isImageFile(this.name)) {
@@ -279,8 +215,6 @@ export class VirtualFile extends VirtualNode {
   }
 
   async write(content: any): Promise<void> {
-    // 写入通常很快，保持原样，也可以加 Task，看需求
-    checkLocked(this.path, "write");
     const store = useFileSystemStore();
     const path = this.path;
     try {
@@ -303,7 +237,6 @@ export class VirtualFile extends VirtualNode {
 
   async rename(newName: string): Promise<void> {
     if (!this.parent) throw new Error("Cannot rename root file");
-    checkLocked(this.path, "rename");
 
     const store = useFileSystemStore();
     const oldPath = this.path;
@@ -327,13 +260,11 @@ export class VirtualFile extends VirtualNode {
     fsEmitter.emit(FSEventType.FILE_RENAMED, { oldPath, newPath });
   }
 
-  // === 集成 Task 的复制 ===
   async copyTo(
     targetFolder: VirtualFolder,
     signal?: AbortSignal
   ): Promise<void> {
     return runAsTask(`复制文件 ${this.name}`, signal, async (s) => {
-      // 耗时模拟（如果需要测试取消）： await new Promise(r => setTimeout(r, 2000));
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
 
       const store = useFileSystemStore();
@@ -363,7 +294,6 @@ export class VirtualFile extends VirtualNode {
   }
 
   async download(): Promise<void> {
-    // 下载也可以包一个 Task
     return runAsTask(`准备下载 ${this.name}`, undefined, async () => {
       let content = await this.read();
       if (typeof content === "object" && !(content instanceof Uint8Array)) {
@@ -390,9 +320,6 @@ export class VirtualFile extends VirtualNode {
 
   async delete(signal?: AbortSignal): Promise<void> {
     if (!this.parent) return;
-    checkLocked(this.path, "delete");
-
-    // 删除单个文件通常很快，不强制 Task，但如果需要统一管理，也可以 wrap
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
     const store = useFileSystemStore();
@@ -405,6 +332,15 @@ export class VirtualFile extends VirtualNode {
 
     fsEmitter.emit(FSEventType.FILE_DELETED, { path });
   }
+
+  // File 节点不支持 createStructure，如果需要统一接口可抛错
+  async moveTo(
+    targetFolder: VirtualFolder,
+    signal?: AbortSignal
+  ): Promise<void> {
+    // 复用基类实现
+    return super.moveTo(targetFolder, signal);
+  }
 }
 
 export class VirtualFolder extends VirtualNode {
@@ -415,7 +351,6 @@ export class VirtualFolder extends VirtualNode {
   }
 
   resolve(relativePath: string): VirtualNode | undefined {
-    // ... 保持不变
     if (!relativePath) return this;
     const parts = relativePath.split("/");
     let current: VirtualNode | undefined = this;
@@ -431,8 +366,6 @@ export class VirtualFolder extends VirtualNode {
   }
 
   async createDir(name: string): Promise<VirtualFolder> {
-    // ... 保持不变
-    checkLocked(this.path, "createDir");
     const path = urlJoin(this.path, name);
     if (this.children.has(name))
       throw new Error(`Directory ${name} already exists`);
@@ -445,8 +378,6 @@ export class VirtualFolder extends VirtualNode {
   }
 
   async createFile(name: string, content: any = ""): Promise<VirtualFile> {
-    // ... 保持不变
-    checkLocked(this.path, "createFile");
     const path = urlJoin(this.path, name);
     if (this.children.has(name)) throw new Error(`File ${name} already exists`);
 
@@ -463,7 +394,60 @@ export class VirtualFolder extends VirtualNode {
     return newFile;
   }
 
-  // createTypedFile 保持不变 ...
+  /**
+   * 递归创建子结构
+   * @param structure 目录结构定义对象
+   * @param isForced 是否强制覆盖，默认为 false（跳过已存在的项）
+   */
+  async createStructure(
+    structure: FSStructure,
+    isForced: boolean = false
+  ): Promise<void> {
+    for (const [name, value] of Object.entries(structure)) {
+      const existingNode = this.children.get(name);
+
+      if (typeof value === "function") {
+        // --- 目标是文件 ---
+        if (existingNode) {
+          if (existingNode instanceof VirtualFolder) {
+            throw new Error(
+              `Cannot create file '${name}': A folder with this name already exists.`
+            );
+          }
+          // 已存在且是文件
+          if (isForced) {
+            const content = await value();
+            await (existingNode as VirtualFile).write(content);
+          }
+          // 如果不是强制模式，则跳过
+        } else {
+          // 不存在，直接创建
+          const content = await value();
+          await this.createFile(name, content);
+        }
+      } else {
+        // --- 目标是文件夹 ---
+        let targetFolder: VirtualFolder;
+
+        if (existingNode) {
+          if (existingNode instanceof VirtualFile) {
+            throw new Error(
+              `Cannot create folder '${name}': A file with this name already exists.`
+            );
+          }
+          targetFolder = existingNode as VirtualFolder;
+        } else {
+          // 不存在则创建
+          targetFolder = await this.createDir(name);
+        }
+
+        // 递归处理子结构
+        // value 此时被判定为 FSStructure (因为不是 function)
+        await targetFolder.createStructure(value as FSStructure, isForced);
+      }
+    }
+  }
+
   async createTypedFile(
     baseName: string,
     semanticType: SemanticType,
@@ -501,15 +485,12 @@ export class VirtualFolder extends VirtualNode {
     return await this.createFile(finalName, initialContent);
   }
 
-  // === 集成 Task 的导入 ===
   async importFile(file: File): Promise<VirtualFile> {
-    // 导入可能涉及大文件读取，包一个 Task
     return runAsTask(`导入 ${file.name}`, undefined, async (s) => {
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
 
       const arrayBuffer = await file.arrayBuffer();
 
-      // 再次检查 signal (如果文件很大，读取后可能被取消)
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
 
       const uint8Array = new Uint8Array(arrayBuffer);
@@ -530,9 +511,7 @@ export class VirtualFolder extends VirtualNode {
   }
 
   async rename(newName: string): Promise<void> {
-    // ... 保持不变
     if (!this.parent) throw new Error("Cannot rename root");
-    checkLocked(this.path, "rename");
 
     const oldPath = this.path;
     const newPath = urlJoin(this.parent.path, newName);
@@ -555,7 +534,6 @@ export class VirtualFolder extends VirtualNode {
     fsEmitter.emit(FSEventType.DIR_RENAMED, { oldPath, newPath });
   }
 
-  // === 集成 Task 的递归复制 (支持取消) ===
   async copyTo(
     targetFolder: VirtualFolder,
     signal?: AbortSignal
@@ -566,18 +544,14 @@ export class VirtualFolder extends VirtualNode {
       const existingNames = new Set(targetFolder.children.keys());
       const uniqueName = getUniqueName(this.name, existingNames);
 
-      // 创建目标文件夹
       const newDir = await targetFolder.createDir(uniqueName);
 
       try {
-        // 递归复制子项
         for (const child of this.children.values()) {
           if (s.aborted) throw new DOMException("Aborted", "AbortError");
-          // 关键：将 signal 传递给子节点的 copyTo
           await child.copyTo(newDir, s);
         }
       } catch (error: any) {
-        // 如果被取消或失败，尝试清理已经创建的半成品文件夹
         if (error.name === "AbortError" || s.aborted) {
           console.warn(`[FS] Copy cancelled. Cleaning up ${newDir.path}...`);
           await newDir
@@ -594,14 +568,11 @@ export class VirtualFolder extends VirtualNode {
     });
   }
 
-  // === 集成 Task 的清空 ===
   async empty(signal?: AbortSignal): Promise<void> {
     return runAsTask(`清空文件夹 ${this.name}`, signal, async (s) => {
-      checkLocked(this.path, "empty");
       const children = Array.from(this.children.values());
       for (const child of children) {
         if (s.aborted) throw new DOMException("Aborted", "AbortError");
-        // 传递 signal 给子项的 delete
         await child.delete(s);
       }
     });
@@ -616,7 +587,6 @@ export class VirtualFolder extends VirtualNode {
   async visitDescendants(
     callback: (node: VirtualNode) => void | Promise<void>
   ) {
-    // ... 保持不变
     for (const child of this.children.values()) {
       await callback(child);
       if (child instanceof VirtualFolder) {
@@ -641,20 +611,15 @@ export class VirtualFolder extends VirtualNode {
     return folders;
   }
 
-  // === 集成 Task 的删除 ===
   async delete(signal?: AbortSignal): Promise<void> {
     return runAsTask(`删除 ${this.name}`, signal, async (s) => {
       if (!this.parent) return;
-      checkLocked(this.path, "delete");
 
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
 
       const path = this.path;
       const store = useFileSystemStore();
 
-      // fsRemove 递归删除在底层是原子的（或者说难以中断），
-      // 但我们还是包在 Task 里，为了 UI 显示和后续清理。
-      // 如果需要真正的“一个个文件删除以支持进度条”，需要手动递归调用 child.delete
       await fsRemove(path, { baseDir: BaseDirectory.AppData, recursive: true });
 
       this.parent.children.delete(this.name);
@@ -667,6 +632,13 @@ export class VirtualFolder extends VirtualNode {
       fsEmitter.emit(FSEventType.DIR_DELETED, { path });
     });
   }
+
+  async moveTo(
+    targetFolder: VirtualFolder,
+    signal?: AbortSignal
+  ): Promise<void> {
+    return super.moveTo(targetFolder, signal);
+  }
 }
 
 // =========================================================================
@@ -674,12 +646,10 @@ export class VirtualFolder extends VirtualNode {
 // =========================================================================
 
 export const useFileSystemStore = defineStore("newFileSystem", () => {
-  // ... (状态和 _buildTreeRecursively, init, refresh 保持不变) ...
   const root = ref<VirtualFolder>(new VirtualFolder("", null));
   const contentCache = reactive(new Map<string, any>());
   const isInitialized = ref(false);
   const appDataPath = ref<string>("");
-  const lockedPaths = reactive(new Set<string>());
 
   const SETTING_PATH = "setting.[setting].json";
   const MODEL_CONFIG_PATH = "modelConfig.[modelConfig].json";
@@ -688,7 +658,6 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
     dirPath: string,
     parent: VirtualFolder
   ) => {
-    // ... 保持原样 ...
     try {
       const entries = await readDir(dirPath, {
         baseDir: BaseDirectory.AppData,
@@ -709,9 +678,7 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
       console.error(`[FS] Failed to build tree for ${dirPath}`, error);
     }
   };
-
   const init = async () => {
-    // ... 保持原样 ...
     if (isInitialized.value) return;
     console.log("[FS] Initializing File System...");
     try {
@@ -720,42 +687,50 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
       console.error("[FS] Failed to get AppData dir", e);
     }
 
-    const requiredDirs = ["global", "character", "preset", "trash"];
-    for (const dir of requiredDirs) {
-      if (!(await exists(dir, { baseDir: BaseDirectory.AppData }))) {
-        await fsMkdir(dir, { baseDir: BaseDirectory.AppData, recursive: true });
-      }
+    // 定义初始文件系统结构
+    // 键为文件名/文件夹名
+    // 值为 FSStructure 对象（代表文件夹）或 返回内容的函数（代表文件）
+    const initialStructure: FSStructure = {
+      global: {
+        template: {}, // 递归创建 global/template
+        preset: {},
+        lorebook: {},
+        background: {},
+        components: {},
+      },
+      character: {},
+      page: {},
+      plugin: {},
+      executable: {},
+      trash: {},
+      // 如果文件不存在，调用函数获取默认内容并写入
+      [SETTING_PATH]: () => createTypedFile("setting"),
+      [MODEL_CONFIG_PATH]: () => createTypedFile("modelConfig"),
+    };
+
+    // 使用临时根节点来执行结构创建
+    // 根节点的 path 为 ""，对应 BaseDirectory.AppData
+    const tempRoot = new VirtualFolder("", null);
+
+    try {
+      // isForced = false: 仅当文件/文件夹不存在时才创建，避免覆盖用户数据
+      await tempRoot.createStructure(initialStructure, false);
+    } catch (e) {
+      console.error("[FS] Failed to initialize file structure", e);
     }
-    const templateDir = "global/template";
-    if (!(await exists(templateDir, { baseDir: BaseDirectory.AppData }))) {
-      await fsMkdir(templateDir, {
-        baseDir: BaseDirectory.AppData,
-        recursive: true,
-      });
-    }
-    if (!(await exists(SETTING_PATH, { baseDir: BaseDirectory.AppData }))) {
-      await writeTextFile(SETTING_PATH, JSON.stringify(newSetting(), null, 2), {
-        baseDir: BaseDirectory.AppData,
-      });
-    }
-    if (
-      !(await exists(MODEL_CONFIG_PATH, { baseDir: BaseDirectory.AppData }))
-    ) {
-      await writeTextFile(
-        MODEL_CONFIG_PATH,
-        JSON.stringify(newModelConfig(), null, 2),
-        { baseDir: BaseDirectory.AppData }
-      );
-    }
+
+    // 构建内存中的虚拟文件树
     const newRoot = new VirtualFolder("", null);
     await _buildTreeRecursively("", newRoot);
     root.value = newRoot;
-    lockedPaths.add(SETTING_PATH);
-    lockedPaths.add(MODEL_CONFIG_PATH);
+
+    // 预加载关键配置文件
     const settingFile = newRoot.resolve(SETTING_PATH);
     if (settingFile instanceof VirtualFile) await settingFile.read();
+
     const modelConfigFile = newRoot.resolve(MODEL_CONFIG_PATH);
     if (modelConfigFile instanceof VirtualFile) await modelConfigFile.read();
+
     isInitialized.value = true;
     console.log("[FS] Initialization Complete.");
   };
@@ -807,7 +782,6 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
     );
   };
 
-  // === 集成 Task 的还原 ===
   const restoreTrashItem = async (key: string) => {
     return runAsTask("还原回收站项目", undefined, async (s) => {
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
@@ -818,10 +792,6 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
 
       const source = urlJoin(TRASH_DIR_PATH, item.key);
       const parentDir = urlJoin(item.originalPath, "..");
-
-      if (lockedPaths.has(item.originalPath)) {
-        throw new Error(`Cannot restore to locked path: ${item.originalPath}`);
-      }
 
       if (!(await exists(parentDir, { baseDir: BaseDirectory.AppData }))) {
         await fsMkdir(parentDir, {
@@ -845,15 +815,11 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
     return root.value.resolve(path);
   };
 
-  const addLock = (path: string) => lockedPaths.add(path);
-  const removeLock = (path: string) => lockedPaths.delete(path);
-
   return {
     root,
     contentCache,
     isInitialized,
     appDataPath,
-    lockedPaths,
     setting,
     modelConfig,
     init,
@@ -862,7 +828,5 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
     restoreTrashItem,
     _readManifest,
     _writeManifest,
-    addLock,
-    removeLock,
   };
 });

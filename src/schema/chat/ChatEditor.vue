@@ -25,6 +25,7 @@ import { type role } from "../shared.types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ChatInputArea from "./ChatInputArea.vue";
 import ChatBubble from "./ChatBubble.vue";
+import MessageScope from "./MessageScope.vue"; // [NEW] 引入包装组件
 import { Button } from "@/components/ui/button";
 import { ArrowDown } from "lucide-vue-next";
 
@@ -235,20 +236,32 @@ const backgroundStyle = computed<CSSProperties>(() => {
         <div
           class="flex flex-col px-4 py-6 max-w-5xl mx-auto w-full min-h-full"
         >
-          <ChatBubble
+          <!--
+            [NEW] 使用 MessageScope 进行隔离包装
+            将 index 和修改方法闭包进去，内部组件无需再传递 index
+          -->
+          <MessageScope
             v-for="(msg, i) in flattenedChat.messages"
             :key="msg.id"
             :message="msg"
             :index="i"
-            :is-editing="editingIndex === i"
-            :avatar-src="resourceAvatar.src.value"
-            v-model:editingContent="editingContent"
-            @edit-start="startEdit"
-            @edit-cancel="cancelEdit"
-            @edit-save="saveEdit"
-            @switch-alt="switchAlternative"
-            @action="handleMessageAction"
-          />
+            :on-update-content="(content) => setMessageContent(i, content)"
+            :on-action="(action) => handleMessageAction(action, i)"
+          >
+            <ChatBubble
+              :message="msg"
+              :index="i"
+              :is-editing="editingIndex === i"
+              :avatar-src="resourceAvatar.src.value"
+              v-model:editingContent="editingContent"
+              @edit-start="startEdit"
+              @edit-cancel="cancelEdit"
+              @edit-save="saveEdit"
+              @switch-alt="switchAlternative"
+              @action="handleMessageAction"
+            />
+          </MessageScope>
+
           <!-- 底部垫高，防止最后一条消息被输入框遮挡 -->
           <div class="h-4"></div>
         </div>

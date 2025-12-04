@@ -9,10 +9,12 @@ import { useFileContent } from "@/features/FileSystem/composables/useFileContent
 import { useVueComponent } from "@/features/FileSystem/composables/useVueComponent";
 import { SemanticTypeMap, type SemanticType } from "@/schema/SemanticType";
 import type { Schema } from "@/components/SchemaRenderer/SchemaRenderer.types";
+import type { ManifestContent } from "@/schema/manifest/manifest.types";
 
 import SchemaRenderer from "@/components/SchemaRenderer/SchemaRenderer.vue";
 import UnknownFileRenderer from "./unknown/UnknownFileRenderer.vue";
-import CharacterLibrary from "./CharacterLibrary.vue"; // 暂时保留引用以便注册，或者在 App 初始化时注册
+import CharacterLibrary from "./CharacterLibrary.vue";
+import Tester from "./Tester.vue";
 import { useUIStore } from "@/features/UI/UI.store";
 
 // --- 1. Props and Store Initialization ---
@@ -21,17 +23,18 @@ const props = defineProps<{
 }>();
 
 const fsStore = useFileSystemStore();
-const uiStore = useUIStore(); // Initialize UI Store
+const uiStore = useUIStore();
 
-// 如果需要在组件内注册默认的内置组件（例如 $character），可以在这里做
-// 或者更推荐在 App.vue 或 store 初始化时完成
+// 注册默认组件 (可选)
 onMounted(() => {
   if (!uiStore.customComponents["$character"]) {
     uiStore.registerComponent("$character", CharacterLibrary);
   }
+  if (!uiStore.customComponents["$test"]) {
+    uiStore.registerComponent("$test", Tester);
+  }
 });
 
-// --- Helper function to reliably check for a Vue component ---
 const isVueComponent = (obj: any): obj is Component => {
   if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
     return false;
@@ -39,22 +42,18 @@ const isVueComponent = (obj: any): obj is Component => {
   return "render" in obj || "setup" in obj || "template" in obj || obj.__name;
 };
 
-// --- 2. File Content and Data Management ---
+// --- 2. File Content ---
 const remoteContent = useFileContent<Record<string, any>>(
   computed(() => props.path)
 );
-
 const localContent = ref<Record<string, any> | null>(null);
 
-// --- 3. Core Rendering Logic ---
+// --- 3. Core Logic ---
 
-// 移除原有的 inlineComponentOverrides，改用 uiStore 中的配置
 const registeredComponent = computed(() => {
-  // 优先匹配全路径 (例如 "$character")
   if (uiStore.customComponents[props.path]) {
     return uiStore.customComponents[props.path];
   }
-  // 其次匹配文件名 (保持原有逻辑兼容性)
   const filename = props.path.split("/").pop();
   if (filename && uiStore.customComponents[filename]) {
     return uiStore.customComponents[filename];
@@ -70,91 +69,88 @@ const semanticType = computed(() => {
   return null;
 });
 
-// 3a. 解析自定义组件覆盖 (来自 manifest 的动态方式)
+/**
+ * 3a. 解析 Manifest 路径 (修复逻辑：递归向上查找)
+ * 解决深层目录下的文件无法找到根目录 manifest 的问题
+ */
 const contextManifestPaths = computed(() => {
   const paths: { self: string | null; global: string } = {
     self: null,
     global: "global/manifest.[manifest].json",
   };
 
-  const parts = props.path.split("/");
-  if (parts.length > 1) {
-    const parentDir = parts.slice(0, -1).join("/");
-    const parentNode = fsStore.resolvePath(parentDir);
-    if (parentNode instanceof VirtualFolder) {
-      for (const [name, node] of parentNode.children) {
-        if (name.endsWith(".[manifest].json") || name === "manifest.json") {
-          paths.self = node.path;
+  // 从当前文件的父目录开始，向上遍历直到根目录
+  let currentPath = props.path.split("/").slice(0, -1).join("/");
+
+  while (currentPath !== "") {
+    const node = fsStore.resolvePath(currentPath);
+    if (node instanceof VirtualFolder) {
+      // 检查当前目录下是否有 manifest
+      for (const [name, child] of node.children) {
+        if (
+          (name.endsWith(".[manifest].json") || name === "manifest.json") &&
+          child instanceof VirtualFile
+        ) {
+          paths.self = child.path;
           break;
         }
       }
+      if (paths.self) break; // 找到了最近的 manifest，停止查找
     }
+
+    // 向上移动一级
+    const parts = currentPath.split("/");
+    parts.pop();
+    currentPath = parts.join("/");
   }
+
   return paths;
 });
 
-const selfMeta = useFileContent<any>(
+// 使用 ManifestContent 接口泛型
+const selfMeta = useFileContent<ManifestContent>(
   computed(() => contextManifestPaths.value.self)
 );
-const globalMeta = useFileContent<any>(
+const globalMeta = useFileContent<ManifestContent>(
   computed(() => contextManifestPaths.value.global)
 );
 
-const customComponentPath = computed(() => {
+/**
+ * 3b. 计算覆盖组件路径
+ * 逻辑：semanticType -> overrides (在 manifest 中) -> path
+ */
+const overrideComponentPath = computed(() => {
   const type = semanticType.value;
   if (!type || type === "unknown") return null;
 
-  const selfOverride = selfMeta.value?.customComponent?.[type];
+  // 优先查找局部 manifest 中的 overrides
+  const selfOverride = selfMeta.value?.overrides?.[type];
   if (selfOverride) return selfOverride;
 
-  const globalOverride = globalMeta.value?.customComponent?.[type];
+  // 其次查找全局 manifest 中的 overrides
+  const globalOverride = globalMeta.value?.overrides?.[type];
   if (globalOverride) return globalOverride;
 
   return null;
 });
 
-const CustomComponent = useVueComponent(customComponentPath);
+// 动态加载覆盖组件
+const OverrideComponent = useVueComponent(overrideComponentPath);
 
 /**
- * 核心决策引擎
+ * 核心渲染决策
  */
 const renderConfig = computed(() => {
-  // 1. UI Store 注册的组件优先 (支持 $internal 和手动覆盖)
+  // 1. UI Store 注册的组件优先 ($internal 等)
   if (registeredComponent.value) {
-    // 特殊逻辑：如果是以 $ 开头的内置组件，不需要等待 localContent (因为没有文件数据)
-    // 或者是已加载数据的普通文件
     const isInternal = props.path.startsWith("$");
-
     if (!isInternal && !localContent.value) {
       return { status: "loading", message: "Loading Data..." };
     }
-
     return {
       status: "render",
       type: "component",
       component: registeredComponent.value,
-      props: {
-        path: props.path,
-        data: localContent.value, // 内置组件可能收到 null，这是预期的
-      },
-    };
-  }
-
-  const type = semanticType.value;
-  if (!type) {
-    // 既然不是已注册的内置组件，如果还没有 type，那就是无效路径
-    return { status: "error", message: "File not found or Invalid path" };
-  }
-
-  // 2. 自定义动态组件覆盖 (基于 Manifest)
-  if (CustomComponent.value) {
-    if (!localContent.value) {
-      return { status: "loading", message: "Loading Editor..." };
-    }
-    return {
-      status: "render",
-      type: "custom",
-      component: CustomComponent.value,
       props: {
         path: props.path,
         data: localContent.value,
@@ -162,7 +158,29 @@ const renderConfig = computed(() => {
     };
   }
 
-  // 3. 语义类型映射 (SemanticTypeMap)
+  const type = semanticType.value;
+  if (!type) {
+    return { status: "error", message: "File not found or Invalid path" };
+  }
+
+  // 2. 语义类型渲染器覆盖 (Based on Manifest Overrides)
+  // 这是本次重构的核心区别：使用 overrides 而不是 customComponents
+  if (OverrideComponent.value) {
+    if (!localContent.value) {
+      return { status: "loading", message: "Loading Custom Editor..." };
+    }
+    return {
+      status: "render",
+      type: "custom",
+      component: OverrideComponent.value,
+      props: {
+        path: props.path,
+        data: localContent.value,
+      },
+    };
+  }
+
+  // 3. 默认语义类型映射
   if (type === "unknown" || !(type in SemanticTypeMap)) {
     return {
       status: "render",
@@ -175,7 +193,7 @@ const renderConfig = computed(() => {
   const definition = SemanticTypeMap[type as SemanticType];
   const renderMethod = definition.renderingMethod;
 
-  // 3a. Vue 组件形式
+  // 3a. Vue Component
   if (isVueComponent(renderMethod)) {
     return {
       status: "render",
@@ -185,7 +203,7 @@ const renderConfig = computed(() => {
     };
   }
 
-  // 3b. Schema 形式 (JSON Forms)
+  // 3b. Schema Form
   const schema =
     typeof renderMethod === "function"
       ? (renderMethod as () => Schema)()
@@ -208,11 +226,11 @@ const renderConfig = computed(() => {
 
   return {
     status: "error",
-    message: `The semantic type '${type}' is configured but has no valid rendering method.`,
+    message: `No rendering method for type '${type}'.`,
   };
 });
 
-// --- 4. Data Synchronization Logic ---
+// --- 4. Data Sync (保持原有逻辑) ---
 
 function handleDataUpdate(newData: Record<string, any>) {
   localContent.value = newData;
@@ -221,7 +239,6 @@ function handleDataUpdate(newData: Record<string, any>) {
 watch(
   localContent,
   (newContent) => {
-    // 只有非内置组件才回写
     if (newContent && !props.path.startsWith("$")) {
       remoteContent.value = newContent;
     }

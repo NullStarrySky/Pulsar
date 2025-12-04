@@ -1,10 +1,5 @@
 // src/schema/modelConfig/modelConfig.models.ts
-import {
-  ProviderMetadata,
-  ChatModel,
-  GenericModel,
-  Capability,
-} from "./modelConfig.types";
+import { ProviderMetadata, ChatModel, GenericModel } from "./modelConfig.types";
 
 // Helper function to convert string arrays to GenericModel arrays
 function toGenericModels(modelNames: string[]): GenericModel[] {
@@ -244,109 +239,6 @@ function getGoogleModels(): ProviderMetadata {
   };
 }
 
-function getGoogleVertexModels(): ProviderMetadata {
-  return {
-    "google-vertex": {
-      enabled: false, // MODIFIED
-      builtIn: true,
-      models: {
-        chat: toEnabledChatModels([
-          {
-            name: "gemini-2.0-flash-001",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-          {
-            name: "gemini-2.0-flash-exp",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-          {
-            name: "gemini-1.5-flash",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-          {
-            name: "gemini-1.5-pro",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-          {
-            name: "claude-3-7-sonnet@20250219",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-          {
-            name: "claude-3-5-sonnet@20240620",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-          {
-            name: "claude-3-haiku@20240307",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-          {
-            name: "claude-3-sonnet@20240229",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-          {
-            name: "claude-3-opus@20240229",
-            capabilities: [
-              "Image Input",
-              "Object Generation",
-              "Tool Usage",
-              "Tool Streaming",
-            ],
-          },
-        ]),
-        embedding: toGenericModels(["text-embedding-004"]),
-        image: toGenericModels([
-          "imagen-3.0-generate-001",
-          "imagen-3.0-generate-002",
-          "imagen-4.0-generate-preview-06-06",
-        ]),
-        speech: [],
-        transcription: [],
-      },
-      apiKeyName: "GOOGLE_APPLICATION_CREDENTIALS",
-    },
-  };
-}
-
 function getDeepseekModels(): ProviderMetadata {
   return {
     deepseek: {
@@ -443,52 +335,6 @@ function getXAIModels(): ProviderMetadata {
   };
 }
 
-// 新增：用于测试模型的函数
-function getTestModels(): ProviderMetadata {
-  const allCapabilities: Capability[] = [
-    "Object Generation",
-    "Tool Usage",
-    "Tool Streaming",
-    "Reasoning",
-  ];
-
-  return {
-    test: {
-      enabled: true, // 默认启用以方便测试
-      builtIn: true,
-      models: {
-        chat: toEnabledChatModels([
-          {
-            name: "mock-text",
-            capabilities: allCapabilities,
-          },
-          {
-            name: "mock-stream-text",
-            capabilities: allCapabilities,
-          },
-          {
-            name: "mock-object",
-            capabilities: allCapabilities,
-          },
-          {
-            name: "mock-stream-object",
-            capabilities: allCapabilities,
-          },
-          {
-            name: "mock-failing",
-            capabilities: allCapabilities,
-          },
-        ]),
-        embedding: [],
-        image: [],
-        speech: [],
-        transcription: [],
-      },
-      apiKeyName: "DUMMY_TEST_KEY", // 这是一个虚拟键
-    },
-  };
-}
-
 /**
  * 统合函数，调用所有 get<Provider>Models 函数并返回一个完整的JSON对象
  * @returns {ProviderMetadata} 包含所有提供商模型信息的完整JSON对象
@@ -499,9 +345,7 @@ export function getAllProviderModels(): ProviderMetadata {
     ...getAzureModels(),
     ...getAnthropicModels(),
     ...getGoogleModels(),
-    ...getGoogleVertexModels(),
     ...getDeepseekModels(),
     ...getXAIModels(),
-    ...getTestModels(),
   };
 }

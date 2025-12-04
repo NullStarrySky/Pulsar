@@ -10,25 +10,31 @@ import { newManifest } from "@/schema/manifest/manifest";
 import ManifestEditor from "./ManifestEditor.vue";
 import { FileWarning, Wand2 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
+import { createTypedFile } from "@/schema/SemanticType";
 
 const props = defineProps<{ activeFilePath?: string | null }>();
 
 const fsStore = useFileSystemStore();
 const uiStore = useUIStore();
 
-// --- 1. 确定目标目录 ---
+// --- 1. 确定目标目录 (character/xxx) ---
 const targetDirectory = computed(() => {
-  // A. 优先 UI 选中的角色文件夹
-  if (uiStore.uiState.activeCharacter) {
-    const charPath = `character/${uiStore.uiState.activeCharacter}`;
-    const node = fsStore.resolvePath(charPath);
-    if (node instanceof VirtualFolder) return charPath;
-  }
-
-  // B. 降级：当前选中的文件所在的目录
   const rawPath = props.activeFilePath ?? uiStore.uiState.activeFile;
   if (!rawPath) return null;
 
+  // 策略：尝试匹配 character/{name} 模式
+  // 无论当前在 character/Alice/lorebook/a.json 还是 character/Alice/manifest.json
+  // 我们都希望定位到 character/Alice
+
+  const parts = rawPath.split("/");
+
+  // 假设结构是 root/type/name/...
+  // 例如 character/Alice/...
+  if (parts.length >= 2 && parts[0] === "character") {
+    return `${parts[0]}/${parts[1]}`;
+  }
+
+  // Fallback: 如果不符合上述模式，使用旧逻辑 (文件取父，文件夹取自)
   const node = fsStore.resolvePath(rawPath);
   if (node instanceof VirtualFile && node.parent) {
     return node.parent.path;
@@ -43,6 +49,7 @@ const targetDirectory = computed(() => {
 const potentialManifestPath = computed(() => {
   const dir = targetDirectory.value;
   if (!dir) return null;
+  // manifest 通常直接放在 character/Alice/ 下
   return `${dir}/manifest.[manifest].json`;
 });
 
@@ -64,8 +71,26 @@ const createManifest = async () => {
   const initialContent = newManifest();
   initialContent.name = dirNode.name || "New Environment";
 
+  // Requirement: 在建立的时候，全局世界书直接选中 global/lorebook 文件夹
+  initialContent.selection.lorebook = ["global/lorebook"];
+
   try {
-    await dirNode.createFile("manifest.[manifest].json", initialContent);
+    // 使用新的 createStructure 方法定义角色结构
+    const structure = {
+      chat: {}, // 空文件夹
+      template: {},
+      lorebook: {},
+      preset: {},
+      background: {},
+      components: {},
+      // Manifest 文件
+      "manifest.[manifest].json": () => {
+        return createTypedFile("manifest")();
+      },
+    };
+
+    // 递归创建结构
+    await dirNode.createStructure(structure);
   } catch (e) {
     console.error("Failed to create manifest", e);
   }

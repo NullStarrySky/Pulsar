@@ -3,8 +3,9 @@
 mod backup;
 mod secrets_manager;
 mod script_manager;
-mod sidecar_manager;
 mod remote_service;
+mod proxy_server; // 新增
+
 mod error;
 
 use std::collections::HashMap; // 引入 HashMap
@@ -25,16 +26,6 @@ fn cleanup_child_processes(handle: &tauri::AppHandle) {
         .unwrap();
 
     rt.block_on(async {
-        // 关闭 sidecar
-        let sidecar_state = handle.state::<sidecar_manager::SidecarState>();
-        if let Some(child) = sidecar_state.child_process.lock().await.take() {
-            println!("Shutting down sidecar process...");
-            if let Err(e) = child.kill() {
-                eprintln!("Failed to kill sidecar process: {}", e);
-            } else {
-                println!("Sidecar process terminated.");
-            }
-        }
 
         // 关闭所有脚本
         let script_state = handle.state::<script_manager::ScriptProcessState>();
@@ -77,17 +68,13 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        // 初始化 SidecarState
-        .manage(sidecar_manager::SidecarState {
-            child_process: Default::default(),
-        })
         .manage(script_manager::ScriptProcessState { // 添加 ScriptProcessState
                children: Mutex::new(HashMap::new()),
            })
+        // 注册端口状态，初始为 0
+        .manage(proxy_server::ProxyPort(std::sync::Mutex::new(0)))
         // 注册所有命令
         .invoke_handler(tauri::generate_handler![
-            sidecar_manager::initialize_sidecar,
-            sidecar_manager::shutdown_sidecar,
             backup::list,
             backup::perform,
             backup::restore,
@@ -98,6 +85,7 @@ pub fn run() {
             secrets_manager::get_all_available_keys,
             secrets_manager::is_key_available,
             secrets_manager::write_secret_key,
+            proxy_server::get_proxy_port,
             remote_service::open_remote_window,
             remote_service::send_to_remote_window
         ])
@@ -116,6 +104,13 @@ pub fn run() {
                       })
                       .build(app)?;
                 }
+                // --- 启动代理服务器 ---
+                         let port = proxy_server::start_proxy_server(app.handle().clone());
+                         // 将端口号保存到 State 中
+                         let port_state = app.state::<proxy_server::ProxyPort>();
+                         *port_state.0.lock().unwrap() = port;
+                         println!("Proxy server initialized on port: {}", port);
+
               Ok(())
             })
         .on_window_event(|window, event| match event {

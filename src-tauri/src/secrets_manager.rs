@@ -10,7 +10,7 @@ use tauri::{AppHandle, Manager};
 
 // 定义错误类型，方便在命令中返回
 #[derive(Debug, thiserror::Error)]
-enum Error {
+pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -51,7 +51,7 @@ fn get_secrets_path(app: &AppHandle) -> Result<PathBuf, Error> {
 }
 
 // 辅助函数：从文件读取密钥
-fn read_secrets(app: &AppHandle) -> Result<HashMap<String, String>, Error> {
+pub fn read_secrets(app: &AppHandle) -> Result<HashMap<String, String>, Error> {
     let path = get_secrets_path(app)?;
     let mut file = File::open(path)?;
     let mut contents = String::new();

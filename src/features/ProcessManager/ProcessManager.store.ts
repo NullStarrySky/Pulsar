@@ -28,16 +28,7 @@ export const useProcessManagerStore = defineStore("processManager", () => {
   const fsStore = useFileSystemStore();
 
   // State
-  const processes = ref<Record<string, Process>>({
-    sidecar: {
-      id: "sidecar",
-      name: "Core Service",
-      type: "sidecar",
-      status: "stopped",
-      output: [],
-      isBuiltin: true,
-    },
-  });
+  const processes = ref<Record<string, Process>>({});
 
   const processList = computed(() => Object.values(processes.value));
   let unlistenFunctions: UnlistenFn[] = [];

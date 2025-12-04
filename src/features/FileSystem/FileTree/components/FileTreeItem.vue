@@ -34,7 +34,6 @@ import type { FlatTreeItem } from "../composables/useFileTree";
 
 const props = defineProps<{
   item: FlatTreeItem;
-  isLocked: boolean;
   canPaste: boolean;
 }>();
 
@@ -169,13 +168,13 @@ const displayName = computed(() => {
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem @select="$emit('cut')" :disabled="isLocked">
+      <ContextMenuItem @select="$emit('cut')">
         <Scissors class="mr-2 h-4 w-4" />剪切
       </ContextMenuItem>
       <ContextMenuItem @select="$emit('copy')">
         <Copy class="mr-2 h-4 w-4" />复制
       </ContextMenuItem>
-      <ContextMenuItem @select="$emit('duplicate')" :disabled="isLocked">
+      <ContextMenuItem @select="$emit('duplicate')">
         <CopyPlus class="mr-2 h-4 w-4" />创建副本
       </ContextMenuItem>
       <ContextMenuItem @select="$emit('paste')" :disabled="!canPaste">
@@ -184,18 +183,17 @@ const displayName = computed(() => {
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem @select="$emit('rename')" :disabled="isLocked">
+      <ContextMenuItem @select="$emit('rename')">
         <FileEdit class="mr-2 h-4 w-4" />重命名
       </ContextMenuItem>
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem @select="$emit('delete')" :disabled="isLocked">
+      <ContextMenuItem @select="$emit('delete')">
         <Trash2 class="mr-2 h-4 w-4" />移入垃圾桶
       </ContextMenuItem>
       <ContextMenuItem
         @select="$emit('permanent-delete')"
-        :disabled="isLocked"
         class="text-red-600 focus:text-red-600 focus:bg-red-50"
       >
         <FileX2 class="mr-2 h-4 w-4" />永久删除

@@ -5,7 +5,7 @@ import {
 } from "@/features/FileSystem/FileSystem.store";
 import WorkbenchTabs from "./WorkbenchTabs.vue";
 import FileRenderer from "@/schema/FileRenderer.vue";
-import RightSidebar from "@/components/layout/RightSidebar.vue";
+import RightSidebar from "@/components/layout/workbench/RightSidebar.vue";
 import { useUIStore } from "@/features/UI/UI.store";
 
 const uiStore = useUIStore();

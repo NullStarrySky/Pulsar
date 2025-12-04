@@ -1,4 +1,3 @@
-<!-- src/schema/CharacterLibrary.vue -->
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import {
@@ -7,6 +6,7 @@ import {
   VirtualFile,
 } from "@/features/FileSystem/FileSystem.store";
 import { useUIStore } from "@/features/UI/UI.store";
+// ... 其他 UI 组件导入保持不变 ...
 import {
   Dialog,
   DialogContent,
@@ -22,50 +22,39 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Plus, Settings2, User } from "lucide-vue-next";
 import defaultCover from "@/assets/default.jpg";
-import { newManifest } from "@/schema/manifest/manifest.ts";
 import urlJoin from "url-join";
+
+// 引入新封装的逻辑
+import { createCharacterEnvironment } from "@/schema/SemanticType";
 
 const fsStore = useFileSystemStore();
 const uiStore = useUIStore();
 
-// --- 数据模型 ---
+// --- 数据模型 & 数据获取  ---
 type CharacterItem = {
   name: string;
   path: string;
   avatarUrl: string;
 };
 
-// --- 数据获取 ---
 const characters = computed<CharacterItem[]>(() => {
-  // 1. 获取 character 根目录
+  // ... 原有的 computed 代码保持不变 ...
   const charRoot = fsStore.root.resolve("character");
   if (!charRoot || !(charRoot instanceof VirtualFolder)) return [];
-
   const list: CharacterItem[] = [];
-
-  // 2. 遍历子文件夹
   for (const [name, node] of charRoot.children.entries()) {
     if (node instanceof VirtualFolder) {
       let avatarUrl = defaultCover;
-
-      // 3. 查找头像 (Avatar.*)
-      // 注意：这里不使用 useInlineResources，因为在循环中使用 hook 开销较大且难以管理
-      // 直接遍历子节点查找符合命名规则的文件
       for (const [childName, childNode] of node.children.entries()) {
         if (
           childNode instanceof VirtualFile &&
           childName.match(/^Avatar\.(png|jpg|jpeg|webp|gif)$/i)
         ) {
-          avatarUrl = childNode.url; // 利用 VirtualNode 的 getter
+          avatarUrl = childNode.url;
           break;
         }
       }
-
-      list.push({
-        name,
-        path: node.path,
-        avatarUrl,
-      });
+      list.push({ name, path: node.path, avatarUrl });
     }
   }
   return list;
@@ -80,35 +69,24 @@ const handleCreateCharacter = async () => {
   const name = newCharacterName.value.trim();
   if (!name) return;
 
-  // 检查名称重复
   const charRoot = fsStore.root.resolve("character");
-  if (charRoot instanceof VirtualFolder && charRoot.children.has(name)) {
+  // 类型检查
+  if (!(charRoot instanceof VirtualFolder)) {
+    console.error("Character root directory missing");
+    return;
+  }
+
+  // 检查名称重复
+  if (charRoot.children.has(name)) {
     alert("角色名称已存在");
     return;
   }
 
   isCreating.value = true;
   try {
-    if (!(charRoot instanceof VirtualFolder)) {
-      throw new Error("Character root directory missing");
-    }
-
-    // 1. 创建角色文件夹
-    const charFolder = await charRoot.createDir(name);
-
-    // 2. 创建子文件夹结构
-    const subFolders = ["chat", "template", "lorebook", "preset"];
-    for (const folder of subFolders) {
-      await charFolder.createDir(folder);
-    }
-
-    // 3. 创建角色定义文件 (typed file)
-    // 根据 VirtualFolder.createTypedFile 签名: (baseName, semanticType, withTemplate)
-    await charFolder.createTypedFile(name, "character", true);
-
-    // 4. 创建 Manifest 文件
-    // 直接写入内容
-    await charFolder.createFile("manifest.[manifest].json", newManifest());
+    // --- 核心修改：调用 SemanticType 中定义的创建环境逻辑 ---
+    // 这里的 charRoot 符合 IFileSystemFolder 接口
+    await createCharacterEnvironment(charRoot, name);
 
     isCreateDialogOpen.value = false;
     newCharacterName.value = "";
@@ -120,27 +98,18 @@ const handleCreateCharacter = async () => {
   }
 };
 
-// --- 交互逻辑 ---
-
-/**
- * 点击卡片：进入聊天界面
- */
+// --- 交互逻辑 (handleCardClick, handleEditClick) 保持不变 ---
 const handleCardClick = async (char: CharacterItem) => {
+  // ... 原有逻辑 ...
   const charName = char.name;
   const charPath = char.path;
 
-  // 1. 设置 UI 状态
-  uiStore.setActiveCharacter(charName);
-
-  // 2. 寻找最近的聊天记录或创建新的
   const chatFolderPath = urlJoin(charPath, "chat");
   const chatNode = fsStore.resolvePath(chatFolderPath);
 
   let targetFile = "";
 
-  // 尝试在 chat 目录下找文件
   if (chatNode instanceof VirtualFolder) {
-    // 寻找任意 .json 文件作为最近对话
     for (const [fileName, node] of chatNode.children) {
       if (node instanceof VirtualFile && fileName.endsWith(".json")) {
         targetFile = node.path;
@@ -149,12 +118,10 @@ const handleCardClick = async (char: CharacterItem) => {
     }
   }
 
-  // 如果没有找到对话文件，初始化默认环境
   if (!targetFile) {
     try {
-      // 确保目录存在
       let charFolder = fsStore.resolvePath(charPath) as VirtualFolder;
-      if (!charFolder) return; // 理论上不应该发生
+      if (!charFolder) return;
 
       let chatFolder = charFolder.children.get("chat");
       if (!(chatFolder instanceof VirtualFolder)) {
@@ -166,8 +133,6 @@ const handleCardClick = async (char: CharacterItem) => {
         templateFolder = await charFolder.createDir("template");
       }
 
-      // 创建默认聊天文件和模板
-      // 注意：VirtualFolder 实例方法调用
       const newChatFile = await (chatFolder as VirtualFolder).createTypedFile(
         charName,
         "chat",
@@ -191,23 +156,9 @@ const handleCardClick = async (char: CharacterItem) => {
   }
 };
 
-/**
- * 点击设置按钮：打开配置侧边栏
- */
 const handleEditClick = (e: Event, char: CharacterItem) => {
+  // ... 原有逻辑 ...
   e.stopPropagation();
-
-  // 1. 设置 activeCharacter，这样 ManifestPanel 里的 useResources 就能根据上下文工作
-  uiStore.setActiveCharacter(char.name);
-
-  // 2. 设置 activeFile。
-  // 为了让 ManifestPanel 正确加载，我们需要 activeFile 指向角色目录下的某个文件，
-  // 或者 ManifestPanel 的逻辑能处理目录。
-  // 根据 useResources 的逻辑：
-  // const parentDir = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
-  // 所以我们可以将 activeFile 设置为该角色下的 manifest 文件，或者主角色卡文件。
-
-  // 尝试寻找 manifest 文件
   const charFolder = fsStore.resolvePath(char.path);
   if (charFolder instanceof VirtualFolder) {
     let manifestPath = "";
@@ -217,26 +168,19 @@ const handleEditClick = (e: Event, char: CharacterItem) => {
         break;
       }
     }
-
-    // 如果找到了 manifest，将其设为 activeFile，这样 useResources 就能直接定位
     if (manifestPath) {
       uiStore.setActiveFile(manifestPath);
     } else {
-      // 否则设为角色目录路径（依赖后续逻辑处理目录路径的情况，或者指向一个假文件）
-      // 这里的妥协方案：指向角色目录，useResources 需要能处理 activeFilePath 是目录的情况，
-      // 或者我们将 activeFile 指向角色卡文件
       uiStore.setActiveFile(urlJoin(char.path, "manifest.[manifest].json"));
     }
   }
-
-  // 3. 打开侧边栏
   uiStore.toggleRightSidebar("manifest-config");
 };
 </script>
 
 <template>
+  <!-- Template 保持完全不变 -->
   <div class="h-full w-full overflow-y-auto bg-background p-6 md:p-8">
-    <!-- 标题区域 -->
     <div class="mb-6 flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold tracking-tight">角色库</h1>
@@ -244,11 +188,9 @@ const handleEditClick = (e: Event, char: CharacterItem) => {
       </div>
     </div>
 
-    <!-- Grid 布局 -->
     <div
       class="grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
     >
-      <!-- 新建角色卡片 -->
       <Dialog v-model:open="isCreateDialogOpen">
         <DialogTrigger as-child>
           <div
@@ -292,7 +234,6 @@ const handleEditClick = (e: Event, char: CharacterItem) => {
         </DialogContent>
       </Dialog>
 
-      <!-- 角色卡片列表 -->
       <Card
         v-for="char in characters"
         :key="char.name"
@@ -301,7 +242,6 @@ const handleEditClick = (e: Event, char: CharacterItem) => {
       >
         <CardContent class="p-0">
           <AspectRatio :ratio="3 / 4">
-            <!-- 图片层 -->
             <div class="h-full w-full overflow-hidden bg-muted">
               <img
                 :src="char.avatarUrl"
@@ -310,13 +250,9 @@ const handleEditClick = (e: Event, char: CharacterItem) => {
                 @error="(e) => (e.target as HTMLImageElement).src = defaultCover"
               />
             </div>
-
-            <!-- 渐变遮罩层 -->
             <div
               class="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent opacity-80"
             ></div>
-
-            <!-- 内容层 -->
             <div class="absolute inset-0 flex flex-col justify-end p-4">
               <div class="flex items-center gap-2">
                 <User class="h-4 w-4 text-white/70" />
@@ -325,8 +261,6 @@ const handleEditClick = (e: Event, char: CharacterItem) => {
                 </h3>
               </div>
             </div>
-
-            <!-- 悬浮操作栏 -->
             <div
               class="absolute right-2 top-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
             >

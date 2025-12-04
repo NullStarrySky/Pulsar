@@ -27,9 +27,6 @@ onMounted(async () => {
     // 2. 初始化文件系统
     await fsStore.init();
     console.log("[App] FileSystem Store initialized.");
-
-    await invoke("initialize_sidecar");
-    console.log("[App] Sidecar initialized successfully.");
   } catch (error) {
     console.error("Failed during app initialization:", error);
   }

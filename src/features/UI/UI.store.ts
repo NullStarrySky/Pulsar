@@ -34,7 +34,7 @@ export interface BottomBarItem {
 export interface UIState {
   openedFiles: string[];
   activeFile: string | null;
-  activeCharacter: string | null;
+  // activeCharacter 已移除
   isFileSidebarOpen: boolean;
   customViews: { name: string; path: string }[];
   subWindows: Map<string, WebviewWindow>;
@@ -55,7 +55,7 @@ export const useUIStore = defineStore("UI", () => {
   const uiState: Ref<UIState> = ref({
     openedFiles: [],
     activeFile: null,
-    activeCharacter: null, // 当前选中的角色上下文
+    // activeCharacter 已移除
     isFileSidebarOpen: true,
     customViews: [],
     subWindows: new Map(),
@@ -209,9 +209,7 @@ export const useUIStore = defineStore("UI", () => {
     uiState.value.activeFile = path;
   };
 
-  const setActiveCharacter = (charName: string | null) => {
-    uiState.value.activeCharacter = charName;
-  };
+  // setActiveCharacter 方法已移除
 
   // --- Persistence & Init ---
   const saveState = () => {
@@ -221,7 +219,7 @@ export const useUIStore = defineStore("UI", () => {
         JSON.stringify({
           openedFiles: uiState.value.openedFiles,
           activeFile: uiState.value.activeFile,
-          activeCharacter: uiState.value.activeCharacter,
+          // activeCharacter 已移除
           isFileSidebarOpen: uiState.value.isFileSidebarOpen,
         })
       );
@@ -237,7 +235,7 @@ export const useUIStore = defineStore("UI", () => {
       const state = JSON.parse(json);
       uiState.value.openedFiles = state.openedFiles || [];
       uiState.value.activeFile = state.activeFile || null;
-      uiState.value.activeCharacter = state.activeCharacter || null;
+      // activeCharacter 已移除
       if (state.isFileSidebarOpen !== undefined)
         uiState.value.isFileSidebarOpen = state.isFileSidebarOpen;
     } catch (e) {
@@ -249,7 +247,7 @@ export const useUIStore = defineStore("UI", () => {
     () => [
       uiState.value.openedFiles,
       uiState.value.activeFile,
-      uiState.value.activeCharacter,
+      // uiState.value.activeCharacter 已移除
       uiState.value.isFileSidebarOpen,
     ],
     saveState,
@@ -282,6 +280,5 @@ export const useUIStore = defineStore("UI", () => {
     openFile,
     closeFile,
     setActiveFile,
-    setActiveCharacter,
   };
 });

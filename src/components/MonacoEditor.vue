@@ -1,15 +1,13 @@
 <!-- src/components/MonacoEditor.vue -->
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, shallowRef } from "vue";
-import * as monaco from "monaco-editor";
+import monaco from "@/utils/monacoCore";
 import type { editor } from "monaco-editor";
-
-// --- 1. 定义 Props 和 Emits ---
 
 const props = withDefaults(
   defineProps<{
     id?: string;
-    language?: string;
+    language?: string; // 支持 'javascript', 'python', 'rust' 等
     options?: editor.IStandaloneEditorConstructionOptions;
   }>(),
   {
@@ -23,25 +21,68 @@ const emit = defineEmits<{
   (e: "editorDidMount", editor: editor.IStandaloneCodeEditor): void;
 }>();
 
-// 使用 defineModel 来实现 v-model 双向绑定
 const model = defineModel<string>({ required: true });
-
-// --- 2. 创建编辑器实例 ---
-
 const editorContainer = ref<HTMLElement | null>(null);
-// 使用 shallowRef 存储编辑器实例以避免性能问题
 const editorRef = shallowRef<editor.IStandaloneCodeEditor | null>(null);
 
-onMounted(() => {
+// --- 🚀 核心优化：动态加载语言包 ---
+// 当 AI 生成代码时，我们按需下载对应的语言高亮规则
+const loadLanguageSupport = async (lang: string) => {
+  try {
+    switch (lang) {
+      case "javascript":
+      case "typescript":
+        // TS/JS 比较特殊，功能很强，通常需要专门引入
+        await import(
+          "monaco-editor/esm/vs/language/typescript/monaco.contribution"
+        );
+        break;
+      case "json":
+        await import("monaco-editor/esm/vs/language/json/monaco.contribution");
+        break;
+      case "css":
+      case "html":
+        // 这些已经在 core 里稍微带了一点，但完整功能需要 contribution
+        await import("monaco-editor/esm/vs/language/html/monaco.contribution");
+        break;
+      case "python":
+        // ✅ 关键：对于普通语言，只加载 basic-languages
+        await import(
+          "monaco-editor/esm/vs/basic-languages/python/python.contribution"
+        );
+        break;
+      case "rust":
+        await import(
+          "monaco-editor/esm/vs/basic-languages/rust/rust.contribution"
+        );
+        break;
+      case "sql":
+        await import(
+          "monaco-editor/esm/vs/basic-languages/sql/sql.contribution"
+        );
+        break;
+      // ... 你可以根据需要添加更多 case，或者做一个映射表
+      // 如果不想写这么多 case，可以用 import.meta.glob 批量导入，但这比较高级
+    }
+  } catch (e) {
+    console.warn(`Failed to load language support for ${lang}`, e);
+  }
+};
+
+onMounted(async () => {
   if (editorContainer.value) {
+    // 1. 先加载当前需要的语言包
+    await loadLanguageSupport(props.language);
+
+    // 2. 初始化编辑器
     const editorInstance = monaco.editor.create(editorContainer.value, {
       value: model.value,
       language: props.language,
-      automaticLayout: true, // 编辑器将自动布局
+      automaticLayout: true,
       ...props.options,
     });
 
-    // 监听内容变化并更新 v-model
+    // 绑定事件
     editorInstance.onDidChangeModelContent(() => {
       const currentValue = editorInstance.getValue();
       if (currentValue !== model.value) {
@@ -50,31 +91,27 @@ onMounted(() => {
     });
 
     editorRef.value = editorInstance;
-    // 触发 editorDidMount 事件，将实例暴露给父组件
     emit("editorDidMount", editorInstance);
   }
 });
 
-// --- 3. 监听 Props 变化 ---
+// 监听语言变化，动态加载新语言
+watch(
+  () => props.language,
+  async (newLang) => {
+    if (editorRef.value) {
+      await loadLanguageSupport(newLang);
+      monaco.editor.setModelLanguage(editorRef.value.getModel()!, newLang);
+    }
+  }
+);
 
-// 监听外部 v-model 的变化，并同步到编辑器
 watch(model, (newValue) => {
   if (editorRef.value && newValue !== editorRef.value.getValue()) {
     editorRef.value.setValue(newValue);
   }
 });
 
-// 监听语言变化
-watch(
-  () => props.language,
-  (newLang) => {
-    if (editorRef.value) {
-      monaco.editor.setModelLanguage(editorRef.value.getModel()!, newLang);
-    }
-  }
-);
-
-// 监听配置项变化
 watch(
   () => props.options,
   (newOptions) => {
@@ -82,8 +119,6 @@ watch(
   },
   { deep: true }
 );
-
-// --- 4. 资源清理 ---
 
 onUnmounted(() => {
   editorRef.value?.dispose();

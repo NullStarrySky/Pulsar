@@ -10,36 +10,22 @@ import {
   useFileSystemStore,
   VirtualFile,
   VirtualFolder,
+  type VirtualFileSystemNode,
 } from "@/features/FileSystem/FileSystem.store";
 import { useFileContent } from "@/features/FileSystem/composables/useFileContent";
+import { createExecuteContext } from "./useExecuteContext"; // 假设这个文件存在
 import { useInlineResources } from "./useInlineResources";
-import { createExecuteContext } from "./useExecuteContext";
 import type { ManifestContent } from "@/schema/manifest/manifest.types";
 import { useVueComponent } from "@/features/FileSystem/composables/useVueComponent";
 
 const AVAILABLE_RESOURCE_TYPES = ["character", "lorebook", "preset"] as const;
 type ResourceTypes = (typeof AVAILABLE_RESOURCE_TYPES)[number];
 
-// --- 类型定义 ---
-
 // 运行时使用的资源节点（包含内容）
 type ResourceNode<T = any> = { path: string; content: T };
 
 export type Resource = {
   [K in ResourceTypes]: ResourceNode[];
-};
-
-// UI 展示用的资源项（包含元数据）
-export type ResourceItem = {
-  path: string;
-  name: string;
-  type: ResourceTypes;
-  source: "global" | "local" | "external";
-  selected: boolean;
-};
-
-export type ResourceGroup = {
-  [K in ResourceTypes]: ResourceItem[];
 };
 
 export function useResources(activeFilePath: MaybeRef<string | null>) {
@@ -62,11 +48,14 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
       return current;
     }
 
-    // B. 父目录寻找 (Local)
+    // B. 从文件反推 Manifest (通常在同一级，或者在 character/xxx 根目录)
+    // 这里的逻辑主要依赖 ManifestPanel 传入正确的 manifest 路径
+    // 如果没有传入，这里做一个简单的 fallback
     const parts = current.split("/");
     const parentDir = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
-    const parentNode = store.resolvePath(parentDir);
 
+    // 尝试在父目录找
+    const parentNode = store.resolvePath(parentDir);
     if (parentNode instanceof VirtualFolder) {
       for (const [name, node] of parentNode.children) {
         if (
@@ -78,113 +67,32 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
       }
     }
 
-    // C. Global fallback
-    const globalManifest = "global/manifest.[manifest].json";
-    if (store.resolvePath(globalManifest) instanceof VirtualFile) {
-      return globalManifest;
-    }
     return null;
   });
 
-  // 使用 useFileContent (自动读写缓存)
+  // 读取 Manifest 内容
   const manifestContent = useFileContent<ManifestContent>(manifestPath);
 
   // =========================================================================
-  // 2. UI 逻辑：可用资源扫描 (availableResources)
+  // 2. 确定 Local 和 Global 的根目录
   // =========================================================================
 
-  const availableResources = computed<ResourceGroup>(() => {
-    const result: ResourceGroup = { character: [], lorebook: [], preset: [] };
-    const mContent = manifestContent.value;
+  const globalRootPath = "global";
 
-    if (!mContent) return result;
-
-    const currentSelection = mContent.selection || {
-      character: [],
-      lorebook: [],
-      preset: [],
-    };
-
-    const processedPaths = new Set<string>();
-
-    const addResource = (
-      path: string,
-      type: ResourceTypes,
-      source: "global" | "local" | "external",
-      forceSelected = false
-    ) => {
-      if (processedPaths.has(path)) return;
-      processedPaths.add(path);
-
-      const isSelected =
-        forceSelected || (currentSelection[type] || []).includes(path);
-      const name = path.split("/").pop() || path;
-
-      result[type].push({
-        path,
-        name,
-        type,
-        source,
-        selected: isSelected,
-      });
-    };
-
-    // A. 扫描 Local (Manifest 所在目录)
-    if (manifestPath.value) {
-      const parentDirPath = manifestPath.value
-        .split("/")
-        .slice(0, -1)
-        .join("/");
-      const localNode = store.resolvePath(parentDirPath);
-      if (localNode instanceof VirtualFolder) {
-        scanFolderForResources(localNode, "local", addResource);
-      }
-    }
-
-    // B. 扫描 Global (global 目录)
-    const globalNode = store.resolvePath("global");
-    if (globalNode instanceof VirtualFolder) {
-      scanFolderForResources(globalNode, "global", addResource);
-    }
-
-    // 排序
-    AVAILABLE_RESOURCE_TYPES.forEach((type) => {
-      result[type].sort((a, b) => {
-        if (a.selected !== b.selected) return a.selected ? -1 : 1;
-        if (a.source !== b.source) {
-          const score = { local: 0, global: 1, external: 2 };
-          return score[a.source] - score[b.source];
-        }
-        return a.name.localeCompare(b.name);
-      });
-    });
-
-    return result;
+  const localRootPath = computed(() => {
+    if (!manifestPath.value) return null;
+    // Manifest 通常位于 character/name/manifest.json
+    // 所以 localRoot 就是 manifest 所在的文件夹
+    const parts = manifestPath.value.split("/");
+    return parts.slice(0, -1).join("/");
   });
 
-  // 辅助扫描函数
-  function scanFolderForResources(
-    folder: VirtualFolder,
-    sourceTag: "global" | "local",
-    adder: (path: string, type: ResourceTypes, source: any) => void
-  ) {
-    for (const [_, node] of folder.children) {
-      if (node instanceof VirtualFile) {
-        if (node.path === manifestPath.value) continue;
-        const type = node.semanticType;
-        if (type && AVAILABLE_RESOURCE_TYPES.includes(type as any)) {
-          adder(node.path, type as ResourceTypes, sourceTag);
-        }
-      }
-    }
-  }
-
   // =========================================================================
-  // 3. 运行时逻辑：内容加载与构建 (Resources & Snapshot)
+  // 3. 运行时逻辑：内容加载与构建 (Snapshot)
   // =========================================================================
 
-  // 获取当前选中的所有路径
-  const activePaths = computed(() => {
+  // 获取当前选中的所有路径 (Raw Paths, 可能包含文件夹)
+  const activeRawPaths = computed(() => {
     const s = manifestContent.value?.selection;
     if (!s) return { character: [], lorebook: [], preset: [] };
     return {
@@ -193,10 +101,140 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
       preset: s.preset || [],
     };
   });
+  /**
+   * 获取可用的背景图片列表 (Local + Global)
+   */
+  const availableBackgrounds = computed<AssetGroup[]>(() => {
+    const imgExts = ["png", "jpg", "jpeg", "webp", "gif", "mp4", "webm"];
+    const groups: AssetGroup[] = [];
 
-  // A. 自动加载选中资源的内容
+    // Local
+    if (localRootPath.value) {
+      const localOpts = scanDirectoryForAssets(
+        `${localRootPath.value}/background`,
+        imgExts
+      );
+      if (localOpts.length > 0) {
+        groups.push({ group: "Local", options: localOpts });
+      }
+    }
+
+    // Global
+    const globalOpts = scanDirectoryForAssets(
+      `${globalRootPath}/background`,
+      imgExts
+    );
+    if (globalOpts.length > 0) {
+      groups.push({ group: "Global", options: globalOpts });
+    }
+
+    return groups;
+  });
+
+  /**
+   * 扫描指定目录下的文件并返回选项列表
+   * @param dirPath 目录路径
+   * @param extensions 允许的扩展名数组 (如 ['png', 'jpg'])
+   */
+  const scanDirectoryForAssets = (
+    dirPath: string,
+    extensions?: string[]
+  ): AssetOption[] => {
+    const node = store.resolvePath(dirPath);
+    if (!(node instanceof VirtualFolder)) return [];
+
+    const options: AssetOption[] = [];
+    for (const [name, child] of node.children) {
+      if (child instanceof VirtualFile) {
+        // 如果指定了扩展名，进行过滤
+        if (extensions) {
+          const ext = name.split(".").pop()?.toLowerCase();
+          if (!ext || !extensions.includes(ext)) continue;
+        }
+        options.push({
+          label: name,
+          value: child.path,
+        });
+      }
+    }
+    return options;
+  };
+
+  /**
+   * 获取可用的组件文件列表 (Local + Global)
+   */
+  const availableComponents = computed<AssetGroup[]>(() => {
+    const compExts = ["vue", "js", "ts"]; // 假设组件是这些格式
+    const groups: AssetGroup[] = [];
+
+    // Local
+    if (localRootPath.value) {
+      // 注意：SemanticType 中创建的是 plural "components"
+      const localOpts = scanDirectoryForAssets(
+        `${localRootPath.value}/components`,
+        compExts
+      );
+      if (localOpts.length > 0) {
+        groups.push({ group: "Local", options: localOpts });
+      }
+    }
+
+    // Global
+    const globalOpts = scanDirectoryForAssets(
+      `${globalRootPath}/components`,
+      compExts
+    );
+    if (globalOpts.length > 0) {
+      groups.push({ group: "Global", options: globalOpts });
+    }
+
+    return groups;
+  });
+
+  /**
+   * 递归解析路径：
+   * 如果是文件 -> 返回该文件
+   * 如果是文件夹 -> 返回该文件夹下所有 JSON 文件 (或者匹配特定类型)
+   */
+  const resolveEffectiveFiles = (paths: string[]): string[] => {
+    const results = new Set<string>();
+
+    const traverse = (node: VirtualFileSystemNode) => {
+      if (node instanceof VirtualFile) {
+        // 简单的过滤逻辑：必须是 json
+        if (node.name.endsWith(".json")) {
+          results.add(node.path);
+        }
+      } else if (node instanceof VirtualFolder) {
+        for (const child of node.children.values()) {
+          traverse(child);
+        }
+      }
+    };
+
+    for (const path of paths) {
+      const node = store.resolvePath(path);
+      if (node) {
+        traverse(node);
+      }
+    }
+
+    return Array.from(results);
+  };
+
+  // 计算出真正需要加载的扁平化文件列表
+  const effectiveFilePaths = computed(() => {
+    const raw = activeRawPaths.value;
+    return {
+      character: resolveEffectiveFiles(raw.character),
+      lorebook: resolveEffectiveFiles(raw.lorebook),
+      preset: resolveEffectiveFiles(raw.preset),
+    };
+  });
+
+  // A. 自动预加载内容
   watch(
-    activePaths,
+    effectiveFilePaths,
     async (paths) => {
       const allPaths = [...paths.character, ...paths.lorebook, ...paths.preset];
       if (allPaths.length === 0) return;
@@ -206,7 +244,6 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
         allPaths.map(async (p) => {
           const node = store.resolvePath(p);
           if (node instanceof VirtualFile) {
-            // read() 内部会自动检查缓存，未缓存则读取文件
             await node
               .read()
               .catch((e) => console.warn(`[Resources] Load failed: ${p}`, e));
@@ -219,8 +256,16 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
 
   // B. 构建 Resources 对象 (供 ExecuteContext 使用)
   const resources = computed((): Resource => {
-    const paths = activePaths.value;
+    const paths = effectiveFilePaths.value;
     const result: any = { character: [], lorebook: [], preset: [] };
+
+    const safeJsonParse = (str: string) => {
+      try {
+        return JSON.parse(str);
+      } catch {
+        return str;
+      }
+    };
 
     AVAILABLE_RESOURCE_TYPES.forEach((type) => {
       result[type] = paths[type]
@@ -239,33 +284,24 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
     return result;
   });
 
-  const safeJsonParse = (str: string) => {
-    try {
-      return JSON.parse(str);
-    } catch {
-      return str;
-    }
-  };
-
-  // C. !!! 核心：提供执行上下文快照 !!!
+  // C. 核心：提供执行上下文快照
   const getExecuteContextSnapshot = (
     customContext: Record<string, any> = {}
   ) => {
-    // 确保 Setting 和 ModelConfig 已加载
     if (!store.setting || !store.modelConfig) {
       console.warn("[Resources] Settings or ModelConfig not loaded yet.");
     }
 
     return createExecuteContext(
       customContext,
-      resources.value,
+      resources.value, // 这里已经是解析文件夹后的扁平数组
       store.setting!,
       store.modelConfig!
     );
   };
 
   // =========================================================================
-  // 4. Actions & Helpers
+  // 4. Actions
   // =========================================================================
 
   const updateManifest = (newContent: ManifestContent) => {
@@ -274,32 +310,20 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
     }
   };
 
-  const toggleSelection = (
-    type: ResourceTypes,
-    path: string,
-    isSelected: boolean
-  ) => {
+  // 直接更新某一类别的选中列表 (ResourceSelector v-model 使用)
+  const updateSelection = (type: ResourceTypes, paths: string[]) => {
     if (!manifestContent.value) return;
-    const currentList = manifestContent.value.selection?.[type] || [];
-    let newList: string[];
-
-    if (isSelected) {
-      newList = Array.from(new Set([...currentList, path]));
-    } else {
-      newList = currentList.filter((p) => p !== path);
-    }
-
     updateManifest({
       ...manifestContent.value,
       selection: {
         ...(manifestContent.value.selection || {}),
-        [type]: newList,
+        [type]: paths,
       },
     });
   };
 
   // =========================================================================
-  // 5. 其他 (Avatar, Background, Components)
+  // 5. 其他
   // =========================================================================
 
   const { avatar } = useInlineResources(manifestPath);
@@ -328,24 +352,28 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
   });
 
   return {
-    // 基础
     manifestPath,
     manifestContent,
 
-    // UI 列表 (Global + Local + Selected)
-    availableResources,
+    // 路径信息
+    localRootPath,
+    globalRootPath,
 
     // 运行时数据
-    resources, // 仅包含选中的且已加载内容的资源
+    resources,
     getExecuteContextSnapshot,
 
     // Actions
     updateManifest,
-    toggleSelection,
+    updateSelection,
 
     // 杂项
     avatar,
     customComponents,
     background,
+
+    // 图片和组件
+    availableBackgrounds,
+    availableComponents,
   };
 }

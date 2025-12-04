@@ -1,5 +1,3 @@
-// src/schema/manifest/manifest.ts
-import { v4 as uuidv4 } from "uuid";
 import type { ManifestContent } from "./manifest.types";
 import { SchemaDefinition } from "../SemanticType";
 import ManifestEditor from "./ManifestEditor.vue";
@@ -8,22 +6,20 @@ import ManifestEditor from "./ManifestEditor.vue";
 
 export function newManifest(): ManifestContent {
   return {
-    id: uuidv4(),
-    name: "Default Context",
-    description: "自动生成的环境配置",
     selection: {
       character: [],
-      lorebook: [],
+      lorebook: ["global/lorebook"],
       preset: [],
     },
-    // 初始化新字段
+    // 内联组件 (标签 -> 路径)
     customComponents: {},
+    // 渲染器覆盖 (类型 -> 路径)
+    overrides: {},
+    // 背景配置
     background: {
       path: "",
       mode: "cover",
     },
-    creation_date: Date.now(),
-    last_modified: Date.now(),
   };
 }
 
@@ -44,9 +40,9 @@ export class ManifestWrapper {
     return this.resource.path;
   }
 
-  // 用于模板渲染（如果需要）
   toString() {
-    return this.resource.content.name;
+    const parts = this.resource.path.split("/");
+    return parts[parts.length - 1].replace(/\.[^/.]+$/, "");
   }
 }
 
@@ -58,11 +54,8 @@ export const ManifestDefinition = {
   wrapperFunction: (
     resources: { path: string; content: ManifestContent }[]
   ) => {
-    // 通常 Manifest 不直接参与 Prompt 也就是不进入 ExecuteContext 的主要对象
-    // 但如果需要在 Prompt 中引用环境名称，可以这样写
     return { MANIFEST: new ManifestWrapper(resources[0]) };
   },
 
-  // 简单的渲染方法，或者指向一个组件
   renderingMethod: ManifestEditor,
 } satisfies SchemaDefinition<ManifestContent>;
