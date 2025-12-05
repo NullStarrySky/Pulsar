@@ -50,9 +50,24 @@ const isVueComponent = (obj: any): obj is Component => {
   return "render" in obj || "setup" in obj || "template" in obj || obj.__name;
 };
 
-// --- 2. File Content ---
+// ---  0. 检测是否为直接的 .vue 文件 ---
+const isDirectVueFile = computed(() => props.path.endsWith(".vue"));
+
+// 使用 useVueComponent 动态编译当前路径
+// 如果路径不是 .vue 结尾，传入 null 以跳过编译
+const compiledVueFile = useVueComponent(
+  computed(() => (isDirectVueFile.value ? props.path : null))
+);
+
+// --- 2. File Content (仅针对数据文件) ---
+// 如果是直接渲染 .vue 文件，我们要避免尝试把它当做 JSON 数据读取，
+// 否则 JSON.parse 会报错。
+const shouldLoadData = computed(
+  () => !isDirectVueFile.value && !props.path.startsWith("$")
+);
+
 const remoteContent = useFileContent<Record<string, any>>(
-  computed(() => props.path)
+  computed(() => (shouldLoadData.value ? props.path : null))
 );
 const localContent = ref<Record<string, any> | null>(null);
 
@@ -77,23 +92,19 @@ const semanticType = computed(() => {
   return null;
 });
 
-/**
- * 3a. 解析 Manifest 路径 (修复逻辑：递归向上查找)
- * 解决深层目录下的文件无法找到根目录 manifest 的问题
- */
+// 解析 Manifest 路径 (逻辑保持不变)
 const contextManifestPaths = computed(() => {
+  if (isDirectVueFile.value) return { self: null, global: null }; // .vue 文件不需要 manifest 上下文查找
+
   const paths: { self: string | null; global: string } = {
     self: null,
     global: "global/manifest.[manifest].json",
   };
 
-  // 从当前文件的父目录开始，向上遍历直到根目录
   let currentPath = props.path.split("/").slice(0, -1).join("/");
-
   while (currentPath !== "") {
     const node = fsStore.resolvePath(currentPath);
     if (node instanceof VirtualFolder) {
-      // 检查当前目录下是否有 manifest
       for (const [name, child] of node.children) {
         if (
           (name.endsWith(".[manifest].json") || name === "manifest.json") &&
@@ -103,19 +114,15 @@ const contextManifestPaths = computed(() => {
           break;
         }
       }
-      if (paths.self) break; // 找到了最近的 manifest，停止查找
+      if (paths.self) break;
     }
-
-    // 向上移动一级
     const parts = currentPath.split("/");
     parts.pop();
     currentPath = parts.join("/");
   }
-
   return paths;
 });
 
-// 使用 ManifestContent 接口泛型
 const selfMeta = useFileContent<ManifestContent>(
   computed(() => contextManifestPaths.value.self)
 );
@@ -123,33 +130,44 @@ const globalMeta = useFileContent<ManifestContent>(
   computed(() => contextManifestPaths.value.global)
 );
 
-/**
- * 3b. 计算覆盖组件路径
- * 逻辑：semanticType -> overrides (在 manifest 中) -> path
- */
+// 计算覆盖组件路径
 const overrideComponentPath = computed(() => {
   const type = semanticType.value;
   if (!type || type === "unknown") return null;
-
-  // 优先查找局部 manifest 中的 overrides
   const selfOverride = selfMeta.value?.overrides?.[type];
   if (selfOverride) return selfOverride;
-
-  // 其次查找全局 manifest 中的 overrides
   const globalOverride = globalMeta.value?.overrides?.[type];
   if (globalOverride) return globalOverride;
-
   return null;
 });
 
-// 动态加载覆盖组件
 const OverrideComponent = useVueComponent(overrideComponentPath);
 
 /**
- * 核心渲染决策
+ * 核心渲染决策 - 更新版
  */
 const renderConfig = computed(() => {
-  // 1. UI Store 注册的组件优先 ($internal 等)
+  // [优先级 0] 直接渲染 .vue 文件
+  // 类似于将 .json 解析为 Object，这里将 .vue 解析为 Component
+  if (isDirectVueFile.value) {
+    if (compiledVueFile.value) {
+      return {
+        status: "render",
+        type: "direct-vue",
+        component: compiledVueFile.value,
+        props: {
+          // 这里可以传入一些环境属性，或者留空
+          // .vue 文件通常自己管理状态
+          filePath: props.path,
+        },
+      };
+    } else {
+      // 正在通过 vue3-sfc-loader 编译
+      return { status: "loading", message: "Compiling Vue Component..." };
+    }
+  }
+
+  // [优先级 1] UI Store 注册的组件 ($internal)
   if (registeredComponent.value) {
     const isInternal = props.path.startsWith("$");
     if (!isInternal && !localContent.value) {
@@ -171,8 +189,7 @@ const renderConfig = computed(() => {
     return { status: "error", message: "File not found or Invalid path" };
   }
 
-  // 2. 语义类型渲染器覆盖 (Based on Manifest Overrides)
-  // 这是本次重构的核心区别：使用 overrides 而不是 customComponents
+  // [优先级 2] 语义类型渲染器覆盖 (Manifest Overrides)
   if (OverrideComponent.value) {
     if (!localContent.value) {
       return { status: "loading", message: "Loading Custom Editor..." };
@@ -188,7 +205,7 @@ const renderConfig = computed(() => {
     };
   }
 
-  // 3. 默认语义类型映射
+  // [优先级 3] 默认语义类型映射
   if (type === "unknown" || !(type in SemanticTypeMap)) {
     return {
       status: "render",
@@ -201,7 +218,7 @@ const renderConfig = computed(() => {
   const definition = SemanticTypeMap[type as SemanticType];
   const renderMethod = definition.renderingMethod;
 
-  // 3a. Vue Component
+  // 3a. Vue Component (静态映射)
   if (isVueComponent(renderMethod)) {
     return {
       status: "render",
@@ -238,16 +255,19 @@ const renderConfig = computed(() => {
   };
 });
 
-// --- 4. Data Sync (保持原有逻辑) ---
+// --- 4. Data Sync ---
 
 function handleDataUpdate(newData: Record<string, any>) {
-  localContent.value = newData;
+  // 只有非 .vue 文件才处理数据同步
+  if (!isDirectVueFile.value) {
+    localContent.value = newData;
+  }
 }
 
 watch(
   localContent,
   (newContent) => {
-    if (newContent && !props.path.startsWith("$")) {
+    if (newContent && !props.path.startsWith("$") && !isDirectVueFile.value) {
       remoteContent.value = newContent;
     }
   },
@@ -257,6 +277,8 @@ watch(
 watch(
   remoteContent,
   (newRemoteContent) => {
+    if (isDirectVueFile.value) return; // 忽略 .vue 文件的内容同步
+
     if (newRemoteContent) {
       if (
         JSON.stringify(newRemoteContent) !== JSON.stringify(localContent.value)
@@ -285,7 +307,10 @@ watch(
       v-else-if="renderConfig.status === 'loading'"
       class="flex h-full w-full items-center justify-center"
     >
-      <p class="text-muted-foreground">{{ renderConfig.message }}</p>
+      <div class="flex flex-col items-center gap-2">
+        <!-- 这里可以加一个 Loading Spinner -->
+        <p class="text-muted-foreground">{{ renderConfig.message }}</p>
+      </div>
     </div>
 
     <div
