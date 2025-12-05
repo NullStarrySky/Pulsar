@@ -206,6 +206,7 @@ export function useFlattenedChat(chatRef: MaybeRef<RootChat>) {
     config?: Partial<MetaGenerateInfo>
   ) => {
     const root = toValue(chatRef);
+
     if (!root) return;
 
     // 使用 Utils 中的查找逻辑
@@ -456,6 +457,7 @@ export function useFlattenedChat(chatRef: MaybeRef<RootChat>) {
     renameAlternative,
     setMessageContent,
     setMessageMeta,
+    findActiveLeafContainer,
     getPath: (index: number) => flattenedChat.value.messages[index]?.path ?? [],
 
     // CRUD

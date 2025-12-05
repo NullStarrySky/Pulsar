@@ -139,12 +139,15 @@ const displayName = computed(() => {
         <Plus class="mr-2 h-4 w-4" />新建文件
       </ContextMenuItem>
       <ContextMenuItem @select="$emit('create-folder')">
-        <Plus class="mr-2 h-4 w-4" />新建文件夹
+        <Plus class="mr-2 h-4 w-4" />
+        新建文件夹
       </ContextMenuItem>
 
       <ContextMenuSub v-if="item.isFolder">
         <ContextMenuSubTrigger>
-          <Plus class="mr-2 h-4 w-4" />新建类型文件
+          <!-- 别问我为什么是14px，CSS是这样的 -->
+          <Plus class="h-4 w-4" style="margin-right: 14px" />
+          新建类型文件
         </ContextMenuSubTrigger>
         <ContextMenuSubContent>
           <ContextMenuItem

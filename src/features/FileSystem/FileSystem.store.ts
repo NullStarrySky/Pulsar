@@ -25,7 +25,7 @@ import type { ModelConfig } from "@/schema/modelConfig/modelConfig.types";
 import {
   SemanticType,
   SemanticTypeMap,
-  createTypedFile,
+  getNewTypedFile,
 } from "@/schema/SemanticType";
 // 引入 Task Store
 import { useTaskStore } from "@/features/Task/Task.store";
@@ -124,14 +124,99 @@ export abstract class VirtualNode {
   abstract unload(): void;
   abstract delete(signal?: AbortSignal): Promise<void>;
   abstract rename(newName: string): Promise<void>;
-  abstract moveTo(
-    targetFolder: VirtualFolder,
-    signal?: AbortSignal
-  ): Promise<void>;
   abstract copyTo(
     targetFolder: VirtualFolder,
     signal?: AbortSignal
   ): Promise<void>;
+
+  /**
+   * 移动节点到目标文件夹
+   * 基类通用实现，支持自动重命名、缓存更新和树结构变更
+   */
+  async moveTo(
+    targetFolder: VirtualFolder,
+    signal?: AbortSignal
+  ): Promise<void> {
+    return runAsTask(`移动 ${this.name}`, signal, async (s) => {
+      if (s.aborted) throw new DOMException("Aborted", "AbortError");
+
+      // 1. 检查：不能移动到自己所在的文件夹
+      if (this.parent === targetFolder) return;
+
+      // 2. 检查：如果是文件夹，不能移动到自己的子文件夹中（循环引用）
+      if (this instanceof VirtualFolder) {
+        let current: VirtualFolder | null = targetFolder;
+        while (current) {
+          if (current === (this as any)) {
+            throw new Error("Cannot move a folder into itself");
+          }
+          current = current.parent;
+        }
+      }
+
+      const store = useFileSystemStore();
+      const oldPath = this.path;
+
+      // 3. 处理重名：获取目标目录下的唯一名称
+      const existingNames = new Set(targetFolder.children.keys());
+      const newName = getUniqueName(this.name, existingNames);
+      const newPath = urlJoin(targetFolder.path, newName);
+
+      // 4. 执行物理文件系统移动
+      await fsRename(oldPath, newPath, {
+        oldPathBaseDir: BaseDirectory.AppData,
+        newPathBaseDir: BaseDirectory.AppData,
+      });
+
+      // 5. 更新虚拟文件树结构
+      // 从旧父节点移除
+      if (this.parent) {
+        this.parent.children.delete(this.name);
+      }
+
+      // 更新自身属性
+      this.name = newName;
+      this.parent = targetFolder;
+
+      // 添加到新父节点
+      targetFolder.children.set(this.name, this);
+
+      // 6. 更新内容缓存 (Store Cache)
+      if (this instanceof VirtualFolder) {
+        // 如果是文件夹，需要查找并更新所有以 oldPath 开头的缓存键
+        // 必须先收集 key 再修改，避免在迭代中修改 Map
+        const keysToUpdate: string[] = [];
+        for (const key of store.contentCache.keys()) {
+          // 匹配完全相等或子路径 (例如 oldPath/child)
+          if (key === oldPath || key.startsWith(oldPath + "/")) {
+            keysToUpdate.push(key);
+          }
+        }
+
+        keysToUpdate.forEach((key) => {
+          const content = store.contentCache.get(key);
+          store.contentCache.delete(key);
+          // 替换路径前缀: oldPath/... -> newPath/...
+          const newKey = newPath + key.slice(oldPath.length);
+          store.contentCache.set(newKey, content);
+        });
+      } else {
+        // 如果是文件，直接更新单个条目
+        if (store.contentCache.has(oldPath)) {
+          const content = store.contentCache.get(oldPath);
+          store.contentCache.delete(oldPath);
+          store.contentCache.set(newPath, content);
+        }
+      }
+
+      // 7. 触发事件
+      const isDir = this instanceof VirtualFolder;
+      fsEmitter.emit(isDir ? FSEventType.DIR_MOVED : FSEventType.FILE_MOVED, {
+        oldPath,
+        newPath,
+      });
+    });
+  }
 
   async moveToTrash(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -423,6 +508,7 @@ export class VirtualFolder extends VirtualNode {
         } else {
           // 不存在，直接创建
           const content = await value();
+          console.log(`try to write: ${content}`);
           await this.createFile(name, content);
         }
       } else {
@@ -704,25 +790,21 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
       executable: {},
       trash: {},
       // 如果文件不存在，调用函数获取默认内容并写入
-      [SETTING_PATH]: () => createTypedFile("setting"),
-      [MODEL_CONFIG_PATH]: () => createTypedFile("modelConfig"),
+      [SETTING_PATH]: () => getNewTypedFile("setting"),
+      [MODEL_CONFIG_PATH]: () => getNewTypedFile("modelConfig"),
     };
-
-    // 使用临时根节点来执行结构创建
-    // 根节点的 path 为 ""，对应 BaseDirectory.AppData
-    const tempRoot = new VirtualFolder("", null);
-
-    try {
-      // isForced = false: 仅当文件/文件夹不存在时才创建，避免覆盖用户数据
-      await tempRoot.createStructure(initialStructure, false);
-    } catch (e) {
-      console.error("[FS] Failed to initialize file structure", e);
-    }
 
     // 构建内存中的虚拟文件树
     const newRoot = new VirtualFolder("", null);
     await _buildTreeRecursively("", newRoot);
     root.value = newRoot;
+
+    try {
+      // isForced = false: 仅当文件/文件夹不存在时才创建，避免覆盖用户数据
+      await newRoot.createStructure(initialStructure, false);
+    } catch (e) {
+      console.error("[FS] Failed to initialize file structure", e);
+    }
 
     // 预加载关键配置文件
     const settingFile = newRoot.resolve(SETTING_PATH);
@@ -830,3 +912,5 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
     _writeManifest,
   };
 });
+
+(window as any).ufs = useFileSystemStore;

@@ -10,7 +10,7 @@ import {
   useFileSystemStore,
   VirtualFile,
   VirtualFolder,
-  type VirtualFileSystemNode,
+  type VirtualNode,
 } from "@/features/FileSystem/FileSystem.store";
 import { useFileContent } from "@/features/FileSystem/composables/useFileContent";
 import { createExecuteContext } from "./useExecuteContext"; // 假设这个文件存在
@@ -199,7 +199,7 @@ export function useResources(activeFilePath: MaybeRef<string | null>) {
   const resolveEffectiveFiles = (paths: string[]): string[] => {
     const results = new Set<string>();
 
-    const traverse = (node: VirtualFileSystemNode) => {
+    const traverse = (node: VirtualNode) => {
       if (node instanceof VirtualFile) {
         // 简单的过滤逻辑：必须是 json
         if (node.name.endsWith(".json")) {

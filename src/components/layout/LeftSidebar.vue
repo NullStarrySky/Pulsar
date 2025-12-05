@@ -8,7 +8,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useUIStore } from "@/features/UI/UI.store";
+import { SidebarView, useUIStore } from "@/features/UI/UI.store";
 
 type OnClickAction = string | Function;
 interface ButtonConfig {
@@ -117,19 +117,20 @@ watchEffect(() => {
 /* 按钮点击处理                                                  */
 /* ======================================================================== */
 const isActionActive = (action: OnClickAction): boolean => {
-  // 如果 action 是字符串 'file-browser'，则绑定到侧边栏是否打开的状态
-  if (action === "file-browser") {
-    return uiStore.uiState.isFileSidebarOpen;
+  // 如果 action 对应当前的 leftSidebarView，则高亮
+  if (typeof action === "string") {
+    return uiStore.uiState.leftSidebarView === action;
   }
   return false;
 };
 
 const handleButtonClick = (action: OnClickAction) => {
   if (typeof action === "string") {
-    if (action === "file-browser") {
-      // 调用 Store 中新增的 toggle 函数
-      uiStore.toggleFileSidebar();
+    // 检查是否是侧边栏视图关键字
+    if (action === "files" || action === "character") {
+      uiStore.toggleSidebarView(action as SidebarView);
     } else {
+      // 否则当作文件路径打开
       uiStore.openFile(action);
     }
   } else if (typeof action === "function") {

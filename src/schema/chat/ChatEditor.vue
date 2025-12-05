@@ -48,7 +48,7 @@ const {
   addNewBranch,
   addBlankBranch,
   polish,
-} = useFlattenedChat(chatReactive.value as Reactive<RootChat>);
+} = useFlattenedChat(chatReactive);
 
 const {
   avatar: resourceAvatar,
@@ -177,7 +177,6 @@ async function onSend(
       filename: f.name,
     } as any);
   }
-
   appendMessageToLeaf(content, role, {
     additionalParts: parts.length ? parts : undefined,
   });

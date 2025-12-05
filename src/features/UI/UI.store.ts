@@ -31,11 +31,12 @@ export interface BottomBarItem {
   component?: Component;
 }
 
+export type SidebarView = "files" | "character" | "none";
+
 export interface UIState {
   openedFiles: string[];
   activeFile: string | null;
-  // activeCharacter 已移除
-  isFileSidebarOpen: boolean;
+  leftSidebarView: SidebarView;
   customViews: { name: string; path: string }[];
   subWindows: Map<string, WebviewWindow>;
   currentWindowLabel: string | null;
@@ -55,8 +56,7 @@ export const useUIStore = defineStore("UI", () => {
   const uiState: Ref<UIState> = ref({
     openedFiles: [],
     activeFile: null,
-    // activeCharacter 已移除
-    isFileSidebarOpen: true,
+    leftSidebarView: "files",
     customViews: [],
     subWindows: new Map(),
     currentWindowLabel: null,
@@ -138,13 +138,21 @@ export const useUIStore = defineStore("UI", () => {
     };
   };
 
-  const toggleFileSidebar = (isOpen?: boolean) => {
-    if (typeof isOpen === "boolean") {
-      uiState.value.isFileSidebarOpen = isOpen;
+  // 切换左侧栏视图
+  const toggleSidebarView = (view: SidebarView) => {
+    if (uiState.value.leftSidebarView === view) {
+      // 如果点击当前已激活的视图，则关闭侧边栏
+      uiState.value.leftSidebarView = "none";
     } else {
-      uiState.value.isFileSidebarOpen = !uiState.value.isFileSidebarOpen;
+      // 否则切换到新视图
+      uiState.value.leftSidebarView = view;
     }
   };
+
+  // 辅助函数：判断左侧栏是否打开
+  const isLeftSidebarOpen = computed(
+    () => uiState.value.leftSidebarView !== "none"
+  );
 
   const toggleRightSidebar = (id?: string) => {
     if (!id) {
@@ -209,8 +217,6 @@ export const useUIStore = defineStore("UI", () => {
     uiState.value.activeFile = path;
   };
 
-  // setActiveCharacter 方法已移除
-
   // --- Persistence & Init ---
   const saveState = () => {
     try {
@@ -219,8 +225,7 @@ export const useUIStore = defineStore("UI", () => {
         JSON.stringify({
           openedFiles: uiState.value.openedFiles,
           activeFile: uiState.value.activeFile,
-          // activeCharacter 已移除
-          isFileSidebarOpen: uiState.value.isFileSidebarOpen,
+          leftSidebarView: uiState.value.leftSidebarView,
         })
       );
     } catch (e) {
@@ -235,9 +240,8 @@ export const useUIStore = defineStore("UI", () => {
       const state = JSON.parse(json);
       uiState.value.openedFiles = state.openedFiles || [];
       uiState.value.activeFile = state.activeFile || null;
-      // activeCharacter 已移除
-      if (state.isFileSidebarOpen !== undefined)
-        uiState.value.isFileSidebarOpen = state.isFileSidebarOpen;
+      if (state.leftSidebarView !== undefined)
+        uiState.value.leftSidebarView = state.leftSidebarView;
     } catch (e) {
       console.error(e);
     }
@@ -247,8 +251,7 @@ export const useUIStore = defineStore("UI", () => {
     () => [
       uiState.value.openedFiles,
       uiState.value.activeFile,
-      // uiState.value.activeCharacter 已移除
-      uiState.value.isFileSidebarOpen,
+      uiState.value.leftSidebarView,
     ],
     saveState,
     { deep: true }
@@ -272,7 +275,8 @@ export const useUIStore = defineStore("UI", () => {
     bottomBarItems,
     addSidebarItem,
     setSidebarContainers,
-    toggleFileSidebar,
+    isLeftSidebarOpen,
+    toggleSidebarView,
     toggleRightSidebar,
     activeRightComponent,
     isSingle,

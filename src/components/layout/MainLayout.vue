@@ -1,23 +1,28 @@
 <!-- src/components/layout/MainLayout.vue -->
 <script setup lang="ts">
 import LeftSidebar from "./LeftSidebar.vue";
+import SidePanelWrapper from "./SidePanelWrapper.vue"; // 引入封装的外壳
 import FileSidebar from "./FileSidebar.vue";
+import CharacterSidebar from "./CharacterSidebar.vue"; // 引入新组件
 import BottomBar from "@/components/layout/BottomBar.vue";
 import Workbench from "./workbench/Workbench.vue";
 import { Files, PlugIcon, Settings, User, FlaskConical } from "lucide-vue-next";
 import { useProcessManagerStore } from "@/features/ProcessManager/ProcessManager.store";
+import { useUIStore } from "@/features/UI/UI.store";
 import { onMounted } from "vue";
 
-// 初始化进程管理器监听
 const processStore = useProcessManagerStore();
+const uiStore = useUIStore();
+
 onMounted(() => {
   processStore.initializeEventListeners();
 });
 
-// 左侧栏配置
+// 调整 topButtons 的 action
+// "onClick" 字符串现在对应 Store 中的 SidebarView 类型
 const topButtons = [
-  { svg: User, onClick: "$character", title: "Character" },
-  { svg: Files, onClick: "file-browser", title: "Files" },
+  { svg: User, onClick: "character", title: "Character Library" },
+  { svg: Files, onClick: "files", title: "File Explorer" },
 ];
 
 const bottomButtons = [
@@ -35,15 +40,21 @@ const bottomButtons = [
   <div
     class="flex flex-col h-screen w-full overflow-hidden bg-gray-100 dark:bg-gray-900"
   >
-    <!-- 中间主体区域：包含左侧栏、文件树、工作台、右侧栏 -->
+    <!-- 中间主体区域 -->
     <div class="flex flex-1 overflow-hidden w-full">
-      <!-- Activity Bar (最左侧图标栏) -->
+      <!-- Activity Bar -->
       <LeftSidebar :top="topButtons" :bottom="bottomButtons" />
 
-      <!-- Explorer Sidebar (文件树) -->
-      <FileSidebar />
+      <!-- 通用侧边栏容器 -->
+      <SidePanelWrapper>
+        <!-- 根据 Store 状态显示不同内容 -->
+        <FileSidebar v-if="uiStore.uiState.leftSidebarView === 'files'" />
+        <CharacterSidebar
+          v-else-if="uiStore.uiState.leftSidebarView === 'character'"
+        />
+      </SidePanelWrapper>
 
-      <!-- 主工作台 (编辑器区域) -->
+      <!-- 主工作台 -->
       <Workbench class="flex-1 min-w-0" />
     </div>
 
@@ -51,7 +62,3 @@ const bottomButtons = [
     <BottomBar />
   </div>
 </template>
-
-<style scoped>
-/* 确保子组件正确填充 */
-</style>

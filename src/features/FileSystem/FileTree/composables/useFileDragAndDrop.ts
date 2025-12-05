@@ -31,8 +31,8 @@ export function useFileDragAndDrop(
     (event.target as HTMLElement).classList.remove("opacity-50");
 
     document
-      .querySelectorAll(".bg-accent/50")
-      .forEach((el) => el.classList.remove("bg-accent/50"));
+      .querySelectorAll(".bg-accent\\/50")
+      .forEach((el) => el.classList.remove("bg-accent\\/50"));
 
     if (hoverTimer.value) clearTimeout(hoverTimer.value);
     lastHoveredPath.value = null;

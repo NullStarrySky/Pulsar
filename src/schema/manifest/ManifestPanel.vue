@@ -10,7 +10,7 @@ import { newManifest } from "@/schema/manifest/manifest";
 import ManifestEditor from "./ManifestEditor.vue";
 import { FileWarning, Wand2 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
-import { createTypedFile } from "@/schema/SemanticType";
+import { getNewTypedFile } from "@/schema/SemanticType";
 
 const props = defineProps<{ activeFilePath?: string | null }>();
 
@@ -85,7 +85,7 @@ const createManifest = async () => {
       components: {},
       // Manifest 文件
       "manifest.[manifest].json": () => {
-        return createTypedFile("manifest")();
+        return getNewTypedFile("manifest");
       },
     };
 

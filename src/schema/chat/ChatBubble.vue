@@ -176,7 +176,7 @@ function handleAction(action: string) {
             <MarkdownRender
               :content="
                 message.content.content ||
-                '<span class=\'opacity-50 italic\'>（空消息）</span>'
+                '<div class=\'opacity-50 italic\'>（空消息）</div>'
               "
               class="prose dark:prose-invert prose-sm md:prose-base max-w-none wrap-break-word leading-relaxed"
               :class="{ 'prose-invert': message.role === 'user' }"

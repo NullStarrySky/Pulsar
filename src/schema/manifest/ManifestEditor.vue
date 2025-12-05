@@ -6,7 +6,7 @@ import {
   useFileSystemStore,
   VirtualFolder,
 } from "@/features/FileSystem/FileSystem.store";
-import { createTypedFile, type SemanticType } from "@/schema/SemanticType";
+import { getNewTypedFile, type SemanticType } from "@/schema/SemanticType";
 
 // UI Components
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -36,7 +36,6 @@ import {
   FolderOpen,
   FileJson,
   AppWindow,
-  Image as IconImage,
 } from "lucide-vue-next";
 import {
   Accordion,
@@ -87,7 +86,7 @@ const createNewResource = async (
   if (!dirNode) {
     const parent = fsStore.resolvePath(root);
     if (parent instanceof VirtualFolder) {
-      await parent.createFolder(type);
+      await parent.createDir(type);
       dirNode = fsStore.resolvePath(targetDir);
     }
   }
@@ -97,8 +96,7 @@ const createNewResource = async (
     return;
   }
 
-  const factory = createTypedFile(type);
-  const content = factory();
+  const content = getNewTypedFile(type);
   const name = `New ${
     type.charAt(0).toUpperCase() + type.slice(1)
   } ${Date.now()}.json`;
@@ -301,7 +299,7 @@ const removeOverride = (type: SemanticType) => {
                           >{{ type }}s</AccordionTrigger
                         >
                         <Button
-                          size="xs"
+                          size="default"
                           variant="ghost"
                           class="h-6 gap-1"
                           @click="createNewResource(type, 'local')"
@@ -347,7 +345,7 @@ const removeOverride = (type: SemanticType) => {
                           >Global {{ type }}s</AccordionTrigger
                         >
                         <Button
-                          size="xs"
+                          size="default"
                           variant="ghost"
                           class="h-6 gap-1"
                           @click="createNewResource(type, 'global')"

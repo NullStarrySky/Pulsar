@@ -71,14 +71,11 @@ export const SemanticTypeMap: SemanticTypeMap = {
 /**
  * 创建特定类型的初始化数据工厂函数
  */
-export function createTypedFile(type: SemanticType) {
-  return (data?: any) => {
-    const definition = SemanticTypeMap[type];
-    if (!definition) throw new Error(`Unknown type: ${type}`);
-    return definition.new(data);
-  };
+export function getNewTypedFile(type: SemanticType, data?: any) {
+  const definition = SemanticTypeMap[type];
+  if (!definition) throw new Error(`Unknown type: ${type}`);
+  return definition.new(data);
 }
-
 /**
  * 初始化角色环境
  * 包含：目录结构、角色定义文件、Manifest 配置文件
@@ -100,10 +97,10 @@ export async function createCharacterEnvironment(
       components: {},
       // 角色定义文件
       [`${charName}.[character].json`]: () =>
-        createTypedFile("character")({ name: charName }),
+        getNewTypedFile("character", { name: charName }),
       // Manifest 文件
       "manifest.[manifest].json": () => {
-        return createTypedFile("manifest")();
+        return getNewTypedFile("manifest");
       },
     },
   };
