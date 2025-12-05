@@ -19,7 +19,7 @@ const props = defineProps<{
   selectionState: "checked" | "indeterminate" | "unchecked";
 }>();
 
-const emit = defineEmits<{
+defineEmits<{
   (e: "toggle-expand"): void;
   (e: "toggle-select"): void;
 }>();

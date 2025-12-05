@@ -1,9 +1,7 @@
 <!-- src/components/SchemaRenderer/content-elements/JSCodeEditor.vue -->
 <script setup lang="ts">
-import { shallowRef } from "vue";
+import { defineAsyncComponent, shallowRef } from "vue";
 import type { editor } from "monaco-editor";
-import MonacoEditor from "@/components/MonacoEditor.vue";
-import monaco from "@/utils/monacoCore";
 import {
   Card,
   CardContent,
@@ -12,7 +10,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-// 注意：这里不需要再配置 self.MonacoEnvironment 了，monacoCore.ts 里配过了
+// 配合 loadingComponent 可以在加载时显示占位符
+const MonacoEditor = defineAsyncComponent({
+  loader: () => import("@/components/MonacoEditor.vue"),
+  loadingComponent: {
+    template:
+      '<div class="h-full w-full flex items-center justify-center text-muted-foreground">编辑器资源加载中...</div>',
+  },
+  delay: 200, // 延迟显示 loading，避免闪烁
+});
 
 const model = defineModel<string>({ required: true });
 const props = defineProps({
@@ -32,9 +38,13 @@ const editorOptions = {
 
 const typeDefs = `...`;
 
-const handleEditorDidMount = (editorInstance: editor.IStandaloneCodeEditor) => {
+const handleEditorDidMount = async (
+  editorInstance: editor.IStandaloneCodeEditor
+) => {
   editorRef.value = editorInstance;
-  // 设置 TS defaults
+
+  const { default: monaco } = await import("@/utils/monacoCore");
+
   monaco.languages.typescript.typescriptDefaults.addExtraLib(
     typeDefs,
     "file:///global.d.ts"

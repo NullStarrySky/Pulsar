@@ -16,7 +16,8 @@
         "width": 1100,
         "height": 600,
         "dragDropEnabled": false,
-        "decorations": false
+        "decorations": false,
+        "visible": false
       }
     ],
     "security": {

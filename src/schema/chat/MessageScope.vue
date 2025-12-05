@@ -1,11 +1,11 @@
 <!-- src/schema/chat/MessageScope.vue -->
 <script lang="ts">
 import { type InjectionKey, type Ref, inject } from "vue";
-import type { FlattenedMessage } from "./chat.types";
+import type { FlatChatMessage } from "./chat.types";
 
 // 定义 Context 类型
 export interface MessageContext {
-  message: Ref<FlattenedMessage>;
+  message: Ref<FlatChatMessage>;
   index: Ref<number>;
   updateContent: (newContent: string) => void;
   dispatchAction: (action: string) => void;
@@ -29,7 +29,7 @@ export function useMessageContext() {
 import { provide, toRef } from "vue";
 
 const props = defineProps<{
-  message: FlattenedMessage;
+  message: FlatChatMessage;
   index: number;
   // 传入回调函数，实现“修改”能力的下放
   onUpdateContent?: (content: string) => void;

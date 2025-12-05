@@ -11,13 +11,12 @@ import { debounce } from "lodash-es";
 
 export function useFileContent<T = any>(
   path: Ref<string | null> | string | null,
-  debounceMs: number = 1000
+  initialValue: T | null = null, // 新增：可选的初始值
+  debounceMs: number = 1000 // 顺延：防抖时间
 ): WritableComputedRef<T | null> {
   const store = useFileSystemStore();
 
   // --- 1. 核心保存逻辑 ---
-
-  // 实际执行写入的操作
   const performWrite = async (filePath: string, data: any) => {
     const node = store.resolvePath(filePath);
     if (node instanceof VirtualFile) {
@@ -30,9 +29,6 @@ export function useFileContent<T = any>(
     }
   };
 
-  // 创建防抖函数。
-  // 但为了防止路径快速切换导致的数据错乱，我们需要精细控制。
-  // 这里的策略是：防抖函数绑定在“当前路径”上。
   const debouncedWriteMap = new Map<string, ReturnType<typeof debounce>>();
 
   const getDebouncedWriter = (filePath: string) => {
@@ -58,6 +54,7 @@ export function useFileContent<T = any>(
       // 加载新文件
       if (newPath) {
         const node = store.resolvePath(newPath);
+        // 如果是文件且缓存中没有，则触发读取
         if (node instanceof VirtualFile && !store.contentCache.has(newPath)) {
           await node.read().catch(console.error);
         }
@@ -70,31 +67,52 @@ export function useFileContent<T = any>(
   const content = computed({
     get: () => {
       const p = unref(path);
-      // 利用 Vue 的响应式特性，这里返回的如果是对象，就是 Proxy
-      return p ? (store.contentCache.get(p) as T) || null : null;
+      if (!p) return null;
+
+      // 获取缓存内容
+      const cached = store.contentCache.get(p);
+
+      // 修改逻辑：
+      // 如果缓存中有值（不为 undefined/null），返回缓存值
+      // 否则，如果提供了 initialValue，返回 initialValue
+      // 最后返回 null
+      if (cached !== undefined && cached !== null) {
+        return cached as T;
+      }
+      return initialValue ?? null;
     },
     set: (newVal) => {
       const p = unref(path);
       if (!p) return;
-      // Setter 只负责更新 Store (内存状态)
-      // Vue 的响应式系统会自动触发下面的 Watcher
+      // Setter 更新 Store，这会让 store.contentCache.has(p) 变为 true
       store.contentCache.set(p, newVal);
     },
   });
 
   // --- 统一监听副作用 ---
   watch(
-    content, // 监听 computed 的返回值
+    content,
     (newVal) => {
       const p = unref(path);
-      // 只有当路径存在，且内容不为 null/undefined 时才写入
-      // (防止文件刚加载尚未读取完成时覆盖为空)
+
+      // 基础空值检查
       if (!p || newVal === undefined || newVal === null) return;
+
+      // --- 关键安全检查 ---
+      // 如果当前 Store 缓存中没有这个文件的记录，说明当前的 newVal 是来自于 initialValue。
+      // 这种情况下，我们绝对不能执行写入操作，否则会发生"竞态条件"：
+      // 在文件内容从磁盘读取完成前，就用 initialValue 把磁盘文件覆盖清空了。
+      //
+      // 只有当用户主动触发了 setter (content.value = ...)，Store 中才会有值，
+      // 此时 has(p) 为 true，允许写入。
+      if (!store.contentCache.has(p)) {
+        return;
+      }
 
       // 触发防抖写入
       getDebouncedWriter(p)(newVal);
     },
-    { deep: true } // 关键：深度监听对象内部变化 (content.value.a.b = 1)
+    { deep: true }
   );
 
   return content as WritableComputedRef<T | null>;

@@ -15,7 +15,11 @@ import {
 import { useFileContent } from "@/features/FileSystem/composables/useFileContent";
 import { createExecuteContext } from "./useExecuteContext"; // 假设这个文件存在
 import { useInlineResources } from "./useInlineResources";
-import type { ManifestContent } from "@/schema/manifest/manifest.types";
+import type {
+  AssetGroup,
+  AssetOption,
+  ManifestContent,
+} from "@/schema/manifest/manifest.types";
 import { useVueComponent } from "@/features/FileSystem/composables/useVueComponent";
 
 const AVAILABLE_RESOURCE_TYPES = ["character", "lorebook", "preset"] as const;

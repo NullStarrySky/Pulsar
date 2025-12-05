@@ -1,6 +1,6 @@
 <!-- src/schema/chat/ChatBubble.vue -->
 <script setup lang="ts">
-import { computed, type Component } from "vue";
+import { computed, defineAsyncComponent, type Component } from "vue";
 import { type FlatChatMessage } from "./chat.types";
 import { type role } from "../shared.types";
 
@@ -20,7 +20,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import MarkdownRender from "markstream-vue";
+const MarkdownRender = defineAsyncComponent(() => import("markstream-vue"));
 
 // Icons
 import {

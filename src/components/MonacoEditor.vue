@@ -1,7 +1,6 @@
 <!-- src/components/MonacoEditor.vue -->
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, shallowRef } from "vue";
-import monaco from "@/utils/monacoCore";
 import type { editor } from "monaco-editor";
 
 const props = withDefaults(
@@ -74,6 +73,8 @@ onMounted(async () => {
     // 1. 先加载当前需要的语言包
     await loadLanguageSupport(props.language);
 
+    const { default: monaco } = await import("@/utils/monacoCore");
+
     // 2. 初始化编辑器
     const editorInstance = monaco.editor.create(editorContainer.value, {
       value: model.value,
@@ -92,6 +93,7 @@ onMounted(async () => {
 
     editorRef.value = editorInstance;
     emit("editorDidMount", editorInstance);
+    (window as any).monacoInstance = monaco;
   }
 });
 
@@ -101,6 +103,8 @@ watch(
   async (newLang) => {
     if (editorRef.value) {
       await loadLanguageSupport(newLang);
+      // 动态导入再次确保安全
+      const { default: monaco } = await import("@/utils/monacoCore");
       monaco.editor.setModelLanguage(editorRef.value.getModel()!, newLang);
     }
   }

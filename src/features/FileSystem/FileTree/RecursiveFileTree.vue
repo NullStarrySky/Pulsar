@@ -1,6 +1,6 @@
 <!-- src/features/FileSystem/FileTree/RecursiveFileTree.vue -->
 <script setup lang="ts">
-import { nextTick, ref, toRef, watch } from "vue";
+import { ref, toRef, watch } from "vue";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import {
@@ -16,7 +16,6 @@ import {
   Clipboard,
   FileText,
   Folder as FolderIcon,
-  Loader2,
 } from "lucide-vue-next";
 import join from "url-join";
 
@@ -123,14 +122,6 @@ const startCreate = (type: "file" | "directory", parentPath: string) => {
 
 <template>
   <div class="h-full w-full relative">
-    <!-- Loading State -->
-    <div
-      v-if="!store.isInitialized"
-      class="absolute inset-0 flex items-center justify-center bg-background/50 z-10"
-    >
-      <Loader2 class="animate-spin" />
-    </div>
-
     <ScrollArea class="h-full w-full">
       <ContextMenu>
         <!-- Root Drop Zone -->
@@ -213,7 +204,7 @@ const startCreate = (type: "file" | "directory", parentPath: string) => {
                     @duplicate="ops.handleDuplicate(item.path)"
                     @paste="ops.handlePaste(item.path)"
                     @copy-path="
-                      (type) => ops.copyPathToClipboard(item.path, type)
+                      (type: any) => ops.copyPathToClipboard(item.path, type)
                     "
                   />
                 </div>

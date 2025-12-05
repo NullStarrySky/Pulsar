@@ -1,5 +1,23 @@
 import { SemanticType } from "@/schema/SemanticType";
 
+// ==========================================
+// 新增类型定义
+// ==========================================
+
+export interface AssetOption {
+  label: string; // 通常是文件名，如 "bg.png"
+  value: string; // 文件的完整虚拟路径
+}
+
+export interface AssetGroup {
+  group: string; // 分组名称，如 "Local", "Global"
+  options: AssetOption[];
+}
+
+// ==========================================
+// 原有类型定义
+// ==========================================
+
 export type ResourceSelection = {
   character?: string[];
   lorebook?: string[];

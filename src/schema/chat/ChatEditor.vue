@@ -1,13 +1,6 @@
 <!-- src/schema/chat/ChatEditor.vue -->
 <script setup lang="ts">
-import {
-  computed,
-  onMounted,
-  type CSSProperties,
-  type Reactive,
-  nextTick,
-  ref,
-} from "vue";
+import { computed, onMounted, type CSSProperties, nextTick, ref } from "vue";
 import { push } from "notivue";
 
 // Features & Composables
@@ -24,10 +17,10 @@ import { type role } from "../shared.types";
 // Components
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ChatInputArea from "./ChatInputArea.vue";
-import ChatBubble from "./ChatBubble.vue";
-import MessageScope from "./MessageScope.vue"; // [NEW] 引入包装组件
+import MessageScope from "./MessageScope.vue";
 import { Button } from "@/components/ui/button";
 import { ArrowDown } from "lucide-vue-next";
+import ChatBubble from "./ChatBubble.vue";
 
 const props = defineProps<{ path: string }>();
 

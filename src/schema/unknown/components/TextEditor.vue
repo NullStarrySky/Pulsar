@@ -1,28 +1,18 @@
 <!-- src/schema/unknown/components/TextEditor.vue -->
 <script setup lang="ts">
-import { shallowRef, computed, type Ref } from "vue";
+import { shallowRef, computed, type Ref, defineAsyncComponent } from "vue";
 import { useFileContent } from "@/features/FileSystem/composables/useFileContent.ts";
-import MonacoEditor from "@/components/MonacoEditor.vue";
 import type { editor } from "monaco-editor";
 
-// --- Worker 配置 ---
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
-import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
-import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
-import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
-
-(self as any).MonacoEnvironment = {
-  getWorker(_: any, label: string) {
-    if (label === "json") return new jsonWorker();
-    if (label === "css" || label === "scss" || label === "less")
-      return new cssWorker();
-    if (label === "html" || label === "handlebars" || label === "razor")
-      return new htmlWorker();
-    if (label === "typescript" || label === "javascript") return new tsWorker();
-    return new editorWorker();
+// 配合 loadingComponent 可以在加载时显示占位符
+const MonacoEditor = defineAsyncComponent({
+  loader: () => import("@/components/MonacoEditor.vue"),
+  loadingComponent: {
+    template:
+      '<div class="h-full w-full flex items-center justify-center text-muted-foreground">编辑器资源加载中...</div>',
   },
-};
+  delay: 200, // 延迟显示 loading，避免闪烁
+});
 
 function getLanguageForFile(filePath: string): string {
   const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
@@ -101,7 +91,7 @@ const handleEditorDidMount = (editorInstance: editor.IStandaloneCodeEditor) => {
 
 <template>
   <div class="h-full w-full">
-    <!-- 将 v-model 绑定到新的计算属性 editorContent -->
+    <!-- content 加载完毕后再渲染异步组件 -->
     <MonacoEditor
       v-if="content !== null && content !== undefined"
       v-model="editorContent"
@@ -111,7 +101,6 @@ const handleEditorDidMount = (editorInstance: editor.IStandaloneCodeEditor) => {
       @editor-did-mount="handleEditorDidMount"
     />
     <div v-else class="flex h-full w-full items-center justify-center">
-      <!-- 加载状态或错误状态 -->
       <p>加载文件中……</p>
     </div>
   </div>

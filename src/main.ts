@@ -6,7 +6,6 @@ import App from "./App.vue";
 
 import "notivue/notification.css";
 import "notivue/animations.css";
-// import "markstream-vue/style.css";
 import "katex/dist/katex.min.css";
 
 if (typeof window !== "undefined" && !window.process) {

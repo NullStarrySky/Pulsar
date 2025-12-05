@@ -26,7 +26,7 @@ import {
   createMessageContainer,
 } from "./chat";
 
-export function useFlattenedChat(chatRef: MaybeRef<RootChat>) {
+export function useFlattenedChat(chatRef: MaybeRef<RootChat | null>) {
   // 1. 核心计算属性：压平聊天记录
   const flattenedChat = computed<FlattenedChat>(() => {
     const root = toValue(chatRef);
@@ -56,7 +56,10 @@ export function useFlattenedChat(chatRef: MaybeRef<RootChat>) {
       console.error(`Invalid flat index: ${index}`);
       return null;
     }
-    return findContainerByPath(toValue(chatRef), path);
+    const root = toValue(chatRef);
+    if (!root) return null;
+
+    return findContainerByPath(root, path);
   }
 
   // ========== 修改操作 (Setters) ==========

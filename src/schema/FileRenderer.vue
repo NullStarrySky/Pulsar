@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch, type Component, onMounted } from "vue";
+import {
+  computed,
+  ref,
+  watch,
+  type Component,
+  onMounted,
+  defineAsyncComponent,
+} from "vue";
 import {
   useFileSystemStore,
   VirtualFile,
@@ -14,8 +21,9 @@ import type { ManifestContent } from "@/schema/manifest/manifest.types";
 import SchemaRenderer from "@/components/SchemaRenderer/SchemaRenderer.vue";
 import UnknownFileRenderer from "./unknown/UnknownFileRenderer.vue";
 import CharacterLibrary from "./CharacterLibrary.vue";
-import Tester from "./Tester.vue";
 import { useUIStore } from "@/features/UI/UI.store";
+
+const Tester = defineAsyncComponent(() => import("./Tester.vue"));
 
 // --- 1. Props and Store Initialization ---
 const props = defineProps<{

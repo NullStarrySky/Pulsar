@@ -1,6 +1,6 @@
 <!-- src/features/FileSystem/ResourceSelector/ResourceSelector.vue -->
 <script setup lang="ts">
-import { ref, computed, toRef, onMounted } from "vue";
+import { computed, toRef, onMounted } from "vue";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Loader2 } from "lucide-vue-next";
 import join from "url-join";

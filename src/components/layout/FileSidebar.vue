@@ -3,13 +3,16 @@
 import { ref } from "vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import RecursiveFileTree from "@/features/FileSystem/FileTree/RecursiveFileTree.vue";
-import { X, Search } from "lucide-vue-next";
+import { useFileSystemStore } from "@/features/FileSystem/FileSystem.store";
+
+import { X, Search, Loader2 } from "lucide-vue-next";
 import { Input } from "@/components/ui/input";
 
 const searchQuery = ref("");
 const activeTab = ref("character");
 let hoverTimer: number | null = null;
 const HOVER_TO_SWITCH_DELAY = 300;
+const store = useFileSystemStore();
 
 const views = [
   { name: "角色", path: "character" },
@@ -80,11 +83,19 @@ function handleTabDragLeave() {
           v-for="view in views"
           :key="`content-${view.path}`"
           :value="view.path"
-          class="h-full mt-0"
+          class="relative h-full mt-0"
         >
+          <!-- Loading State -->
+          <div
+            v-show="!store.isInitialized"
+            class="absolute inset-0 flex items-center justify-center bg-background/50 z-10"
+          >
+            <Loader2 class="animate-spin" />
+          </div>
           <RecursiveFileTree
             :root-path="view.path"
             :search-query="searchQuery"
+            v-show="store.isInitialized"
           />
         </TabsContent>
       </div>
