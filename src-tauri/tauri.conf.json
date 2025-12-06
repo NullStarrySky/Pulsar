@@ -21,7 +21,11 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost  * data: blob: filesystem: about: ws: wss:; script-src * data: blob: 'unsafe-inline' 'unsafe-eval'; style-src * data: blob: 'unsafe-inline'; connect-src * data: blob: ws: wss:; img-src * data: blob:; frame-src * data: blob:; font-src * data: blob:;"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost  * data: blob: filesystem: about: ws: wss:; script-src * data: blob: 'unsafe-inline' 'unsafe-eval'; style-src * data: blob: 'unsafe-inline'; connect-src * data: blob: ws: wss:; img-src * data: blob:; frame-src * data: blob:; font-src * data: blob:;",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     },
     "withGlobalTauri": true
   },

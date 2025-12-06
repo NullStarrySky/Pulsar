@@ -69,7 +69,6 @@ export type Setting = {
   vectorization: VectorizationSetting;
   messageFavorites?: FavoriteMessageItem[];
   characterFavorites?: string[];
-  hiddenLayouts?: string[];
   tools: string[];
   backup: BackupSettings;
   extensions: Record<string, ExtensionConfig>;

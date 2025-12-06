@@ -16,6 +16,7 @@ import {
   convertFileSrc as tauriConvertFileSrc,
   appDataDir,
 } from "@/features/FileSystem/fs.api";
+import { invoke } from "@tauri-apps/api/core"; // 新增引用
 import { BaseDirectory, type FileInfo } from "@tauri-apps/plugin-fs";
 import { debounce } from "lodash-es";
 import urlJoin from "url-join";
@@ -396,6 +397,35 @@ export class VirtualFile extends VirtualNode {
     });
   }
 
+  /**
+   * 解压缩文件
+   * 仅支持 zip 格式。解压后会刷新整个文件系统树。
+   */
+  async decompress(signal?: AbortSignal): Promise<void> {
+    if (this.extension !== ".zip") {
+      throw new Error("仅支持解压 .zip 文件");
+    }
+
+    return runAsTask(`解压 ${this.name}`, signal, async (s) => {
+      if (s.aborted) throw new DOMException("Aborted", "AbortError");
+      const store = useFileSystemStore();
+      const fullPath = store.appDataPath
+        ? urlJoin(store.appDataPath, this.path)
+        : this.path;
+
+      // 调用后端 decompress 命令
+      await invoke("decompress", {
+        fromPath: fullPath,
+        // toPath 为空时，默认解压到当前文件所在父目录（类似于 Extract Here）
+        toPath: undefined,
+      });
+
+      // 解压会产生新的文件/文件夹，需要刷新虚拟文件系统树以同步状态
+      await store.refresh();
+      console.log(`[FS] ${this.name} 解压成功`);
+    });
+  }
+
   unload(): void {
     const store = useFileSystemStore();
     if (store.contentCache.has(this.path)) {
@@ -595,28 +625,42 @@ export class VirtualFolder extends VirtualNode {
       return await this.createFile(safeName, content);
     });
   }
-
   async rename(newName: string): Promise<void> {
     if (!this.parent) throw new Error("Cannot rename root");
 
-    const oldPath = this.path;
+    const store = useFileSystemStore();
+    const oldPath = this.path; // 保存旧路径用于计算
     const newPath = urlJoin(this.parent.path, newName);
 
+    // 1. 物理重命名
     await fsRename(oldPath, newPath, {
       oldPathBaseDir: BaseDirectory.AppData,
       newPathBaseDir: BaseDirectory.AppData,
     });
 
+    // 2. 更新虚拟树结构
     this.parent.children.delete(this.name);
     this.name = newName;
     this.parent.children.set(newName, this);
 
-    const store = useFileSystemStore();
+    // 3. [FIX] 迁移缓存而不是删除缓存
+    // 必须先收集 key，不能在遍历 Map 时修改 Map
+    const keysToUpdate: string[] = [];
     for (const key of store.contentCache.keys()) {
-      if (key.startsWith(oldPath + "/")) {
-        store.contentCache.delete(key);
+      if (key === oldPath || key.startsWith(oldPath + "/")) {
+        keysToUpdate.push(key);
       }
     }
+
+    keysToUpdate.forEach((key) => {
+      const content = store.contentCache.get(key);
+      store.contentCache.delete(key);
+      // 计算新 key: 替换路径前缀
+      const newKey = newPath + key.slice(oldPath.length);
+      store.contentCache.set(newKey, content);
+    });
+
+    // 4. 发出事件
     fsEmitter.emit(FSEventType.DIR_RENAMED, { oldPath, newPath });
   }
 
@@ -661,6 +705,43 @@ export class VirtualFolder extends VirtualNode {
         if (s.aborted) throw new DOMException("Aborted", "AbortError");
         await child.delete(s);
       }
+    });
+  }
+
+  /**
+   * 压缩当前文件夹
+   * 默认行为：排除名为 "chat" 的子目录（保护隐私），
+   * 但这不会影响位于其他路径（如 global/template/chat.[chat].json）的模板文件。
+   */
+  async compress(signal?: AbortSignal): Promise<void> {
+    return runAsTask(`压缩 ${this.name}`, signal, async (s) => {
+      if (s.aborted) throw new DOMException("Aborted", "AbortError");
+      const store = useFileSystemStore();
+      const fullPath = store.appDataPath
+        ? urlJoin(store.appDataPath, this.path)
+        : this.path;
+
+      // 默认排除项：'chat'
+      // 后端逻辑：将 exclude 列表中的每一项与源路径 join，然后检查 entry.path() 是否以该路径开头。
+      // 效果：如果当前文件夹下有 chat/ 目录，它将被排除。
+      // 注意：'global/template/chat.[chat].json' 不在 'chat/' 目录下，因此不会被排除，符合需求。
+      const excludePatterns = ["chat"];
+
+      await invoke("compress", {
+        fromPath: fullPath,
+        toPath: undefined, // 默认在同级目录生成 zip
+        exclude: excludePatterns,
+      });
+
+      console.log({
+        fromPath: fullPath,
+        toPath: undefined, // 默认在同级目录生成 zip
+        exclude: excludePatterns,
+      });
+
+      // 压缩会生成 .zip 文件，刷新文件系统树以显示它
+      await store.refresh();
+      console.log(`[FS] ${this.name} 压缩成功`);
     });
   }
 

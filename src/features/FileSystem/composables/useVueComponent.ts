@@ -9,8 +9,8 @@ import {
   shallowRef,
   watch,
 } from "vue";
-// 添加这一行：导入完整的 Vue 命名空间
 import * as Vue from "vue";
+import * as Pinia from "pinia";
 import { loadModule } from "vue3-sfc-loader";
 import { useFileSystemStore, VirtualFile } from "../FileSystem.store";
 
@@ -26,14 +26,16 @@ const options = {
    * 定义 .vue 文件中可以 import 的模块
    */
   moduleCache: {
-    // 修复点：直接传递 Vue 对象，而不是 import("vue")
+    // 直接传递 Vue 对象，而不是 import("vue")
     // 这确保了 pushScopeId, popScopeId 等内部方法对 scoped 样式可用
     vue: Vue,
+    pinia: Pinia,
 
     // 映射 Tauri API
     "@tauri-apps/api/core": tauri.core,
     "@tauri-apps/plugin-fs": tauri.fs,
     "@tauri-apps/plugin-dialog": tauri.dialog,
+    tauri: tauri,
   },
 
   /**

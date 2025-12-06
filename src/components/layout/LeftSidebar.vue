@@ -1,12 +1,5 @@
 <script setup lang="ts">
-import {
-  type PropType,
-  type Component,
-  computed,
-  watchEffect,
-  ref,
-  onUnmounted,
-} from "vue";
+import { type PropType, type Component, computed, watchEffect, ref } from "vue";
 import { useColorMode, useStorage, onClickOutside } from "@vueuse/core";
 import {
   Sun,
@@ -343,7 +336,7 @@ const handleButtonClick = (action: OnClickAction) => {
       <div
         v-if="showContextMenu"
         ref="contextMenuRef"
-        class="fixed z-50 min-w-[160px] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
+        class="fixed z-50 min-w-40 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
         :style="{
           top: `${contextMenuPos.y}px`,
           left: `${contextMenuPos.x}px`,

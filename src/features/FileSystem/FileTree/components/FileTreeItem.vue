@@ -17,6 +17,8 @@ import {
   Plus,
   FileJson,
   Image as ImageIcon,
+  Archive, // 用于压缩
+  ArchiveRestore,
 } from "lucide-vue-next";
 import {
   ContextMenu,
@@ -37,6 +39,7 @@ const props = defineProps<{
   canPaste: boolean;
 }>();
 
+// --- 更新 emits，添加 compress 和 decompress ---
 defineEmits<{
   (e: "click"): void;
   (e: "dblclick"): void;
@@ -50,6 +53,9 @@ defineEmits<{
   (e: "duplicate"): void;
   (e: "paste"): void;
   (e: "copy-path", type: "relative" | "absolute" | "src"): void;
+  // 新增事件
+  (e: "compress"): void;
+  (e: "decompress"): void;
 }>();
 
 const ops = useFileOperations();
@@ -97,6 +103,10 @@ const displayName = computed(() => {
   return semanticMatch
     ? nameWithoutExt.substring(0, semanticMatch.index)
     : nameWithoutExt;
+});
+
+const isZipFile = computed(() => {
+  return !props.item.isFolder && props.item.name.toLowerCase().endsWith(".zip");
 });
 </script>
 
@@ -170,6 +180,17 @@ const displayName = computed(() => {
       </ContextMenuItem>
 
       <ContextMenuSeparator />
+
+      <!-- 文件夹显示压缩 -->
+      <ContextMenuItem v-if="item.isFolder" @select="$emit('compress')">
+        <Archive class="mr-2 h-4 w-4" />压缩为 Zip
+      </ContextMenuItem>
+      <!-- Zip 文件显示解压 -->
+      <ContextMenuItem v-if="isZipFile" @select="$emit('decompress')">
+        <ArchiveRestore class="mr-2 h-4 w-4" />解压到当前目录
+      </ContextMenuItem>
+
+      <ContextMenuSeparator v-if="item.isFolder || isZipFile" />
 
       <ContextMenuItem @select="$emit('cut')">
         <Scissors class="mr-2 h-4 w-4" />剪切

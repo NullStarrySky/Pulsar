@@ -12,20 +12,14 @@ use walkdir::WalkDir;
 use zip::write::{FileOptions, ZipWriter};
 use zip::{CompressionMethod, ZipArchive};
 
+// --- 结构体定义 ---
+
 // 添加 Deserialize，因为现在它将从前端接收
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BackupSettings {
     pub max_backups: u32,
     pub excluded_paths: Vec<String>,
 }
-
-/// 获取应用数据目录的路径
-fn get_data_dir(app: &AppHandle) -> Result<PathBuf> {
-    let app_data_dir = app.path().app_data_dir()?;
-    Ok(app_data_dir)
-}
-
-// --- 结构体定义 ---
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -47,9 +41,14 @@ pub struct BackupResult {
 
 // --- 辅助函数 ---
 
+/// 获取应用数据目录的路径
+fn get_data_dir(app: &AppHandle) -> Result<PathBuf> {
+    let app_data_dir = app.path().app_data_dir()?;
+    Ok(app_data_dir)
+}
+
 /// 获取备份目录的路径 (e.g., /path/to/appdata/backup)
 fn get_backup_dir(app: &AppHandle) -> Result<PathBuf> {
-    // 使用 ? 操作符简化错误处理
     let app_data_dir = app.path().app_data_dir()?;
     let backup_dir = app_data_dir.join("backup");
     Ok(backup_dir)
@@ -63,7 +62,227 @@ fn validate_backup_filename(filename: &str) -> Result<()> {
     Ok(())
 }
 
-// --- Tauri 命令 ---
+// --- 通用压缩/解压逻辑 ---
+
+/// 将指定目录压缩成一个 ZIP 文件
+/// src_dir: 源目录
+/// dst_file: 目标 zip 文件路径
+/// base_prefix: zip 内部的根路径前缀 (例如 "data")，传 "" 则不添加前缀
+/// excluded_paths: 需要排除的绝对路径列表
+
+/// 将指定目录压缩成一个 ZIP 文件
+pub fn compress_dir(
+    src_dir: &Path,
+    dst_file: &Path,
+    base_prefix: &str,
+    excluded_paths: &[PathBuf],
+) -> Result<()> {
+    info!(
+        "开始压缩目录 '{}' 到 '{}'",
+        src_dir.display(),
+        dst_file.display()
+    );
+
+    let file = File::create(dst_file)?;
+    let mut zip = ZipWriter::new(file);
+    let options: FileOptions<()> =
+        FileOptions::default().compression_method(CompressionMethod::Deflated);
+
+    let walker = WalkDir::new(src_dir).into_iter();
+    for entry in walker.filter_entry(|e| !excluded_paths.iter().any(|p| e.path().starts_with(p))) {
+        let entry = entry.map_err(|e| AppError::Io(e.into()))?;
+        let path = entry.path();
+
+        // 排除根目录本身，避免添加空名字条目
+        if path == src_dir {
+            continue;
+        }
+
+        // 计算 zip 内的相对路径
+        let name = path
+            .strip_prefix(src_dir)
+            .expect("Path is not a prefix of the base path");
+
+        // --- 关键修改开始 ---
+        // 1. 获取字符串形式
+        let name_str = name.to_string_lossy();
+
+        // 2. 强制转换 Windows 反斜杠为标准 ZIP 斜杠
+        // ZIP 规范要求必须是 forward slashes
+        let normalized_name = name_str.replace('\\', "/");
+
+        // 3. 手动拼接前缀，不使用 Path::join (避免再次引入系统分隔符)
+        let zip_path_str = if base_prefix.is_empty() {
+            normalized_name
+        } else {
+            format!("{}/{}", base_prefix, normalized_name)
+        };
+        // --- 关键修改结束 ---
+
+        if path.is_file() {
+            zip.start_file(zip_path_str, options)?;
+            let mut f = File::open(path)?;
+            io::copy(&mut f, &mut zip)?;
+        } else if !name.as_os_str().is_empty() {
+            zip.add_directory(zip_path_str, options)?;
+        }
+    }
+
+    zip.finish()?;
+    info!("目录压缩成功。");
+    Ok(())
+}
+
+/// 将一个 ZIP 文件解压缩到指定目录
+/// src_file: zip 文件路径
+/// dst_dir: 目标目录
+/// strip_prefix: 解压时需要移除的内部前缀 (例如 "data")，传 "" 则保持原样
+pub fn decompress_zip(src_file: &Path, dst_dir: &Path, strip_prefix: &str) -> Result<()> {
+    info!(
+        "开始从 '{}' 解压到 '{}'",
+        src_file.display(),
+        dst_dir.display()
+    );
+
+    let file = File::open(src_file)?;
+    let mut archive = ZipArchive::new(file)?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+
+        // 路径处理：剥离前缀
+        let outpath_rel = match file
+            .enclosed_name()
+            .and_then(|p| {
+                p.strip_prefix(strip_prefix)
+                 .ok()
+                 .map(|s| s.to_path_buf())
+            })
+        {
+            Some(path) => path,
+            None => continue,
+        };
+
+        let outpath_abs = dst_dir.join(outpath_rel);
+
+        // 安全检查
+        if !outpath_abs.starts_with(dst_dir) {
+            error!("检测到 Zip Slip 攻击尝试: {}", file.name());
+            return Err(AppError::PathTraversal(file.name().to_string()));
+        }
+
+        if file.name().ends_with('/') {
+            fs::create_dir_all(&outpath_abs)?;
+        } else {
+            if let Some(p) = outpath_abs.parent() {
+                if !p.exists() {
+                    fs::create_dir_all(p)?;
+                }
+            }
+            let mut outfile = File::create(&outpath_abs)?;
+            io::copy(&mut file, &mut outfile)?;
+        }
+    }
+
+    info!("文件解压成功。");
+    Ok(())
+}
+
+// --- Tauri 命令: 通用压缩/解压 ---
+
+/// [Tauri Command] 压缩文件或文件夹
+/// from_path: 源路径
+/// to_path: (可选) 目标文件夹路径。默认为 from_path 的父级
+/// exclude: (可选) 需要排除的文件/文件夹模式字符串数组
+#[tauri::command(rename_all = "camelCase")]
+pub async fn compress(
+    from_path: String,
+    to_path: Option<String>,
+    exclude: Option<Vec<String>>,
+) -> Result<()> {
+    let src_path = PathBuf::from(&from_path);
+    if !src_path.exists() {
+        return Err(AppError::NotFound(from_path));
+    }
+
+    // 1. 确定目标文件夹
+    let parent_dir = src_path
+        .parent()
+        .ok_or_else(|| AppError::OperationFailed("无法获取父级目录".into()))?;
+
+    let target_dir = match to_path {
+        Some(ref p) => PathBuf::from(p),
+        None => parent_dir.to_path_buf(),
+    };
+
+    // 确保目标文件夹存在
+    if !target_dir.exists() {
+        fs::create_dir_all(&target_dir)?;
+    }
+
+    // 2. 确定 ZIP 文件名 (源文件名.zip)
+    let file_name = src_path
+        .file_name()
+        .ok_or_else(|| AppError::OperationFailed("无效的源路径名称".into()))?
+        .to_string_lossy();
+    let zip_name = format!("{}.zip", file_name);
+    let dest_zip_path = target_dir.join(zip_name);
+
+    info!("正在压缩 {} 到 {}", src_path.display(), dest_zip_path.display());
+
+    // 3. 处理排除项 (转为绝对路径)
+    let excluded_paths_abs: Vec<PathBuf> = exclude
+        .unwrap_or_default()
+        .iter()
+        .map(|p| src_path.join(p))
+        .collect();
+
+    // 4. 执行压缩
+    if src_path.is_file() {
+        // 单文件压缩特殊处理：直接将文件放入 zip 根目录
+        let file = File::create(&dest_zip_path)?;
+        let mut zip = ZipWriter::new(file);
+        let options: FileOptions<()> =
+            FileOptions::default().compression_method(CompressionMethod::Deflated);
+
+        zip.start_file(file_name.into_owned(), options)?;
+        let mut f = File::open(&src_path)?;
+        io::copy(&mut f, &mut zip)?;
+        zip.finish()?;
+        info!("单文件压缩成功。");
+    } else {
+        // 文件夹压缩：使用现有逻辑，前缀为空
+        compress_dir(&src_path, &dest_zip_path, "", &excluded_paths_abs)?;
+    }
+
+    Ok(())
+}
+
+/// [Tauri Command] 解压文件
+/// from_path: zip 文件路径
+/// to_path: (可选) 解压到的目标文件夹。默认为 from_path 的父级
+#[tauri::command(rename_all = "camelCase")]
+pub async fn decompress(from_path: String, to_path: Option<String>) -> Result<()> {
+    let src_path = PathBuf::from(&from_path);
+    if !src_path.exists() {
+        return Err(AppError::NotFound(from_path));
+    }
+
+    // 1. 确定目标文件夹
+    let parent_dir = src_path
+        .parent()
+        .ok_or_else(|| AppError::OperationFailed("无法获取父级目录".into()))?;
+
+    let target_dir = match to_path {
+        Some(ref p) => PathBuf::from(p),
+        None => parent_dir.to_path_buf(),
+    };
+
+    // 2. 执行解压 (前缀为空)
+    decompress_zip(&src_path, &target_dir, "")
+}
+
+// --- Tauri 命令: 备份相关 (保留原有业务逻辑) ---
 
 /// 获取所有备份文件的列表
 #[tauri::command(rename_all = "snake_case")]
@@ -103,7 +322,6 @@ pub async fn list(app: AppHandle) -> Result<Vec<BackupInfo>> {
 /// 执行一次全量备份
 #[tauri::command(rename_all = "snake_case")]
 pub async fn perform(app: AppHandle, settings: BackupSettings) -> Result<BackupResult> {
-    // 设置现在由前端传入，不再从文件加载
     let data_dir = get_data_dir(&app)?;
     let backup_dir = get_backup_dir(&app)?;
 
@@ -124,7 +342,7 @@ pub async fn perform(app: AppHandle, settings: BackupSettings) -> Result<BackupR
     compress_dir(
         &data_dir,
         &backup_filepath,
-        "data", // 在 zip 内部创建一个 'data' 根目录
+        "data", // 业务逻辑：在 zip 内部创建一个 'data' 根目录
         &excluded_paths_abs,
     )?;
 
@@ -134,7 +352,6 @@ pub async fn perform(app: AppHandle, settings: BackupSettings) -> Result<BackupR
     // 删除旧备份
     let mut backups = list(app.clone()).await?;
     if backups.len() > settings.max_backups as usize {
-        // list返回的已经是按时间倒序排列的，所以直接取末尾的即可
         backups.reverse(); // 反转为时间升序
         let to_delete_count = backups.len() - settings.max_backups as usize;
         for backup_to_delete in backups.iter().take(to_delete_count) {
@@ -167,8 +384,6 @@ pub async fn restore(app: AppHandle, backup_name: String) -> Result<String> {
     }
 
     info!("正在创建恢复前的紧急备份...");
-    // 注意：紧急备份需要一个临时的设置，这里我们使用一个合理的默认值。
-    // 或者，您可以要求前端也为紧急备份传递设置。
     let emergency_settings = BackupSettings {
         max_backups: 999, // 紧急备份不应触发旧备份删除
         excluded_paths: vec![".DS_Store".to_string(), "logs".to_string()],
@@ -190,7 +405,7 @@ pub async fn restore(app: AppHandle, backup_name: String) -> Result<String> {
     decompress_zip(
         &backup_filepath,
         &data_dir,
-        "data", // 从 zip 内的路径中剥离 'data' 前缀
+        "data", // 业务逻辑：从 zip 内的路径中剥离 'data' 前缀
     )?;
 
     info!("从备份 {} 恢复完成。", backup_name);
@@ -199,121 +414,4 @@ pub async fn restore(app: AppHandle, backup_name: String) -> Result<String> {
         "数据已成功从 {} 恢复。应用配置需要重新加载。",
         backup_name
     ))
-}
-
-/// 将指定目录压缩成一个 ZIP 文件
-pub fn compress_dir(
-    src_dir: &Path,
-    dst_file: &Path,
-    base_prefix: &str,
-    excluded_paths: &[PathBuf],
-) -> Result<()> {
-    info!(
-        "开始压缩目录 '{}' 到 '{}'",
-        src_dir.display(),
-        dst_file.display()
-    );
-
-    let file = File::create(dst_file)?;
-    let mut zip = ZipWriter::new(file);
-    let options: FileOptions<()> =
-        FileOptions::default().compression_method(CompressionMethod::Deflated);
-
-    let walker = WalkDir::new(src_dir).into_iter();
-    for entry in walker.filter_entry(|e| !excluded_paths.iter().any(|p| e.path().starts_with(p))) {
-        let entry = entry.map_err(|e| AppError::Io(e.into()))?;
-        let path = entry.path();
-        let name = path
-            .strip_prefix(src_dir)
-            .expect("Path is not a prefix of the base path");
-
-        let zip_path_str = Path::new(base_prefix)
-            .join(name)
-            .to_string_lossy()
-            .into_owned();
-
-        if path.is_file() {
-            zip.start_file(zip_path_str, options)?;
-            let mut f = File::open(path)?;
-            io::copy(&mut f, &mut zip)?;
-        } else if !name.as_os_str().is_empty() {
-            zip.add_directory(zip_path_str, options)?;
-        }
-    }
-
-    zip.finish()?;
-    info!("目录压缩成功。");
-    Ok(())
-}
-/// 将一个 ZIP 文件解压缩到指定目录
-pub fn decompress_zip(src_file: &Path, dst_dir: &Path, strip_prefix: &str) -> Result<()> {
-    info!(
-        "开始从 '{}' 解压到 '{}'",
-        src_file.display(),
-        dst_dir.display()
-    );
-
-    let file = File::open(src_file)?;
-    let mut archive = ZipArchive::new(file)?;
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-
-        // --- 修复开始 ---
-        // 关键修改：在 and_then 闭包 *内部* 就完成到 PathBuf 的转换。
-        // 这样闭包返回的是 Option<PathBuf>，不再包含任何临时的借用。
-        let outpath_rel = match file
-            .enclosed_name()
-            .and_then(|p| {
-                p.strip_prefix(strip_prefix)
-                 .ok()
-                 .map(|s| s.to_path_buf()) // <--- 移动到这里
-            })
-        {
-            Some(path) => path,
-            None => continue,
-        };
-        // --- 修复结束 ---
-
-        let outpath_abs = dst_dir.join(outpath_rel);
-
-        if !outpath_abs.starts_with(dst_dir) {
-            error!("检测到 Zip Slip 攻击尝试: {}", file.name());
-            return Err(AppError::PathTraversal(file.name().to_string()));
-        }
-
-        if file.name().ends_with('/') {
-            fs::create_dir_all(&outpath_abs)?;
-        } else {
-            if let Some(p) = outpath_abs.parent() {
-                if !p.exists() {
-                    fs::create_dir_all(p)?;
-                }
-            }
-            let mut outfile = File::create(&outpath_abs)?;
-            io::copy(&mut file, &mut outfile)?;
-        }
-    }
-
-    info!("文件解压成功。");
-    Ok(())
-}
-
-/// [Tauri Command] 压缩一个文件夹
-#[tauri::command(rename_all = "snake_case")]
-pub async fn compress(source_dir: String, destination_zip: String) -> Result<()> {
-    let src_path = PathBuf::from(source_dir);
-    let dst_path = PathBuf::from(destination_zip);
-    let excluded: [PathBuf; 0] = [];
-
-    compress_dir(&src_path, &dst_path, "", &excluded)
-}
-
-/// [Tauri Command] 解压一个文件
-#[tauri::command(rename_all = "snake_case")]
-pub async fn decompress(source_zip: String, destination_dir: String) -> Result<()> {
-    let src_path = PathBuf::from(source_zip);
-    let dst_path = PathBuf::from(destination_dir);
-
-    decompress_zip(&src_path, &dst_path, "")
 }

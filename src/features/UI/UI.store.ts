@@ -1,3 +1,5 @@
+// src/stores/UI.store.ts
+
 import { defineStore } from "pinia";
 import {
   ref,
@@ -15,7 +17,11 @@ import {
 import {
   useFileSystemStore,
   VirtualFile,
+  TRASH_DIR_PATH, // 引入垃圾桶路径常量
 } from "../FileSystem/FileSystem.store";
+
+// 引入事件系统
+import { FSEventType, fsEmitter } from "../FileSystem/FileSystem.events";
 
 import { Cpu, ClipboardList, Key, Server, Settings2 } from "lucide-vue-next";
 import ProcessPanel from "../ProcessManager/ProcessPanel.vue";
@@ -24,6 +30,7 @@ import SecretsPanel from "../Secrets/SecretsPanel.vue";
 import McpPanel from "../MCP/McpPanel.vue";
 import ManifestPanel from "@/schema/manifest/ManifestPanel.vue";
 
+// ... (BottomBarItem, SidebarView, UIState 接口定义保持不变) ...
 export interface BottomBarItem {
   id: string;
   name: string;
@@ -69,14 +76,9 @@ export const useUIStore = defineStore("UI", () => {
     customSidebarIds: [],
   });
 
-  // --- 新增: 自定义/内置组件映射 ---
-  // key: 完整路径 (例如 "$character" 或 "file.json")
-  // value: Vue Component
   const customComponents = shallowRef<Record<string, Component>>({});
-
   const isSingle = computed(() => uiState.value.windowMode === "single");
 
-  // --- Sidebar & Bottom Bar Config ---
   const bottomBarItems = shallowRef<BottomBarItem[]>([
     {
       id: "manifest-config",
@@ -127,10 +129,6 @@ export const useUIStore = defineStore("UI", () => {
     uiState.value.customSidebarIds = ids;
   };
 
-  /**
-   * 注册自定义组件到特定路径
-   * 允许注册以 $ 开头的虚拟路径组件
-   */
   const registerComponent = (path: string, component: Component) => {
     customComponents.value = {
       ...customComponents.value,
@@ -138,18 +136,14 @@ export const useUIStore = defineStore("UI", () => {
     };
   };
 
-  // 切换左侧栏视图
   const toggleSidebarView = (view: SidebarView) => {
     if (uiState.value.leftSidebarView === view) {
-      // 如果点击当前已激活的视图，则关闭侧边栏
       uiState.value.leftSidebarView = "none";
     } else {
-      // 否则切换到新视图
       uiState.value.leftSidebarView = view;
     }
   };
 
-  // 辅助函数：判断左侧栏是否打开
   const isLeftSidebarOpen = computed(
     () => uiState.value.leftSidebarView !== "none"
   );
@@ -159,7 +153,6 @@ export const useUIStore = defineStore("UI", () => {
       uiState.value.isRightSidebarOpen = !uiState.value.isRightSidebarOpen;
       return;
     }
-
     if (
       uiState.value.isRightSidebarOpen &&
       uiState.value.activeRightPanelId === id
@@ -180,10 +173,7 @@ export const useUIStore = defineStore("UI", () => {
 
   // --- File Logic ---
   const openFile = (path: string) => {
-    // 逻辑修改：如果路径以 $ 开头，视为内置虚拟组件，跳过文件系统检查
     const isInternalComponent = path.startsWith("$");
-
-    // 只有非内置组件才检查文件系统
     if (!isInternalComponent) {
       const node = fsStore.resolvePath(path);
       if (!node || !(node instanceof VirtualFile)) {
@@ -193,7 +183,6 @@ export const useUIStore = defineStore("UI", () => {
         return;
       }
     }
-
     if (!uiState.value.openedFiles.includes(path)) {
       uiState.value.openedFiles.push(path);
     }
@@ -204,12 +193,16 @@ export const useUIStore = defineStore("UI", () => {
     const index = uiState.value.openedFiles.indexOf(path);
     if (index === -1) return;
     uiState.value.openedFiles.splice(index, 1);
+
+    // 如果关闭的是当前激活的文件，尝试切换到其他文件
     if (uiState.value.activeFile === path) {
-      uiState.value.activeFile =
-        uiState.value.openedFiles.length > 0
-          ? uiState.value.openedFiles[index] ??
-            uiState.value.openedFiles[uiState.value.openedFiles.length - 1]
-          : null;
+      // 优先选右边的，没有则选左边的，再没有则置空
+      const nextFile =
+        uiState.value.openedFiles[index] ??
+        uiState.value.openedFiles[index - 1] ??
+        null;
+
+      uiState.value.activeFile = nextFile;
     }
   };
 
@@ -217,7 +210,7 @@ export const useUIStore = defineStore("UI", () => {
     uiState.value.activeFile = path;
   };
 
-  // --- Persistence & Init ---
+  // --- Persistence ---
   const saveState = () => {
     try {
       localStorage.setItem(
@@ -238,6 +231,7 @@ export const useUIStore = defineStore("UI", () => {
     if (!json) return;
     try {
       const state = JSON.parse(json);
+      // 恢复时验证文件是否存在（可选，防止打开已死的文件）
       uiState.value.openedFiles = state.openedFiles || [];
       uiState.value.activeFile = state.activeFile || null;
       if (state.leftSidebarView !== undefined)
@@ -257,6 +251,83 @@ export const useUIStore = defineStore("UI", () => {
     { deep: true }
   );
 
+  // --- Event Handling Logic ---
+
+  /**
+   * 处理文件/文件夹路径变更（重命名或移动）
+   */
+  const handlePathChange = (oldPath: string, newPath: string) => {
+    // 检查是否移入了回收站
+    if (
+      newPath.startsWith(TRASH_DIR_PATH + "/") ||
+      newPath === TRASH_DIR_PATH
+    ) {
+      handlePathDeletion(oldPath);
+      return;
+    }
+
+    // 1. 更新 openedFiles
+    // 必须创建一个新数组以保持响应性，或者小心地替换
+    for (let i = 0; i < uiState.value.openedFiles.length; i++) {
+      const currentPath = uiState.value.openedFiles[i];
+      if (currentPath === oldPath) {
+        // 完全匹配（文件重命名）
+        uiState.value.openedFiles[i] = newPath;
+      } else if (currentPath.startsWith(oldPath + "/")) {
+        // 前缀匹配（文件夹重命名导致子文件路径变更）
+        uiState.value.openedFiles[i] =
+          newPath + currentPath.slice(oldPath.length);
+      }
+    }
+
+    // 2. 更新 activeFile
+    const active = uiState.value.activeFile;
+    if (active) {
+      if (active === oldPath) {
+        uiState.value.activeFile = newPath;
+      } else if (active.startsWith(oldPath + "/")) {
+        uiState.value.activeFile = newPath + active.slice(oldPath.length);
+      }
+    }
+  };
+
+  /**
+   * 处理文件/文件夹删除
+   */
+  const handlePathDeletion = (path: string) => {
+    // 找出所有受影响的打开文件（自身或子文件）
+    const filesToClose = uiState.value.openedFiles.filter(
+      (opened) => opened === path || opened.startsWith(path + "/")
+    );
+
+    // 逐个关闭
+    filesToClose.forEach((file) => closeFile(file));
+  };
+
+  const setupEventListeners = () => {
+    // 文件事件
+    fsEmitter.on(FSEventType.FILE_RENAMED, ({ oldPath, newPath }) =>
+      handlePathChange(oldPath, newPath)
+    );
+    fsEmitter.on(FSEventType.FILE_MOVED, ({ oldPath, newPath }) =>
+      handlePathChange(oldPath, newPath)
+    );
+    fsEmitter.on(FSEventType.FILE_DELETED, ({ path }) =>
+      handlePathDeletion(path)
+    );
+
+    // 文件夹事件
+    fsEmitter.on(FSEventType.DIR_RENAMED, ({ oldPath, newPath }) =>
+      handlePathChange(oldPath, newPath)
+    );
+    fsEmitter.on(FSEventType.DIR_MOVED, ({ oldPath, newPath }) =>
+      handlePathChange(oldPath, newPath)
+    );
+    fsEmitter.on(FSEventType.DIR_DELETED, ({ path }) =>
+      handlePathDeletion(path)
+    );
+  };
+
   const init = async () => {
     if (uiState.value.isInitialized) return;
     try {
@@ -264,14 +335,18 @@ export const useUIStore = defineStore("UI", () => {
     } catch (e) {
       console.warn("Not running in Tauri window context");
     }
+
+    // 启动监听
+    setupEventListeners();
+
     restoreState();
     uiState.value.isInitialized = true;
   };
 
   return {
     uiState,
-    customComponents, // 导出 customComponents
-    registerComponent, // 导出注册方法
+    customComponents,
+    registerComponent,
     bottomBarItems,
     addSidebarItem,
     setSidebarContainers,

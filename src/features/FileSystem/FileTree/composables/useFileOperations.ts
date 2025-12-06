@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import {
   useFileSystemStore,
+  VirtualFile,
   VirtualFolder,
 } from "@/features/FileSystem/FileSystem.store";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -162,6 +163,31 @@ export function useFileOperations() {
     await writeText(text);
   };
 
+  // --- 新增: 压缩与解压逻辑 ---
+  const handleCompress = async (path: string) => {
+    const node = store.resolvePath(path);
+    if (node instanceof VirtualFolder) {
+      try {
+        await node.compress();
+      } catch (error) {
+        console.error("Compression failed:", error);
+        // 这里可以对接您的 Toast/Notification 系统
+      }
+    }
+  };
+
+  const handleDecompress = async (path: string) => {
+    const node = store.resolvePath(path);
+    // 确保是文件且是 .zip
+    if (node instanceof VirtualFile && node.name.endsWith(".zip")) {
+      try {
+        await node.decompress();
+      } catch (error) {
+        console.error("Decompression failed:", error);
+      }
+    }
+  };
+
   return {
     clipboard,
     nodeToDelete,
@@ -179,5 +205,7 @@ export function useFileOperations() {
     confirmPermanentDelete,
     executePermanentDelete,
     copyPathToClipboard,
+    handleCompress,
+    handleDecompress,
   };
 }

@@ -206,6 +206,8 @@ const startCreate = (type: "file" | "directory", parentPath: string) => {
                     @copy-path="
                       (type: any) => ops.copyPathToClipboard(item.path, type)
                     "
+                    @compress="ops.handleCompress(item.path)"
+                    @decompress="ops.handleDecompress(item.path)"
                   />
                 </div>
               </li>
