@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { Character } from "./character.types.ts";
 import { SchemaDefinition } from "../SemanticType.js";
 import { characterSchema } from "./character.schema.js";
+
 /**
  * 创建一个新的、默认的 Character 对象.
  * @returns 一个新的 Character 对象。
@@ -43,15 +44,39 @@ class CharacterWrapper {
   }
 
   /**
-   * 当直接在模板中使用 `{{CHARACTER}}` 时，默认返回第一个角色的描述。
-   * @returns {string} 第一个角色的描述，如果不存在则为空字符串。
+   * 当直接在模板中使用 `{{CHARACTER}}` 时，默认返回第一个角色的结构化描述。
+   * 使用 XML 标签和换行符构建清晰的上下文结构。
+   * @returns {string} 结构化后的角色描述字符串。
    */
   toString(): string {
-    return (
-      this.resources[0]?.content.personality +
-      this.resources[0]?.content.mes_example +
-      this.resources[0]?.content.scenario
-    );
+    const character = this.resources[0]?.content;
+    if (!character) {
+      return "";
+    }
+
+    const sections: string[] = [];
+
+    // 添加性格描述
+    if (character.personality && character.personality.trim()) {
+      sections.push(
+        `<personality>\n${character.personality.trim()}\n</personality>`
+      );
+    }
+
+    // 添加场景描述
+    if (character.scenario && character.scenario.trim()) {
+      sections.push(`<scenario>\n${character.scenario.trim()}\n</scenario>`);
+    }
+
+    // 添加对话示例
+    if (character.mes_example && character.mes_example.trim()) {
+      sections.push(
+        `<message_examples>\n${character.mes_example.trim()}\n</message_examples>`
+      );
+    }
+
+    // 使用双换行符连接各部分，确保清晰分隔
+    return sections.join("\n\n");
   }
 
   /**

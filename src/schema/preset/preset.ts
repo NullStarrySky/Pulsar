@@ -274,7 +274,8 @@ function createDefaultPreset(): Preset {
             enabled: true,
             role: "system",
             injectPosition: "BEFORE_CHAR",
-            content: "你是 {{character.name}}。\n{{character.description}}",
+            content:
+              "你是 {{CHARACTER.name}}。\n你的性格是{{CHARACTER.personality}}， 对话历史为[[CHAT]]",
           },
         ],
       },

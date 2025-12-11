@@ -1,7 +1,6 @@
 <script lang="ts">
 import { type InjectionKey, type Ref, inject } from "vue";
 import type { FlatChatMessage } from "./chat.types";
-// ... (Context 部分保持不变)
 export interface MessageContext {
   message: Ref<FlatChatMessage>;
   index: Ref<number>;
@@ -73,6 +72,7 @@ import {
   Volume2,
   Check,
   Plus,
+  Tag,
 } from "lucide-vue-next";
 import { useClipboard } from "@vueuse/core";
 

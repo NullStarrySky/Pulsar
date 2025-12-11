@@ -124,7 +124,7 @@ defineExpose({ setDraft });
     <!-- 悬浮岛容器 -->
     <!-- 适配：移动端减小圆角，去除边框使其与键盘融合更好，或保留微边框 -->
     <div
-      class="relative flex flex-col bg-background/80 backdrop-blur-sm shadow-xl transition-all duration-300 ring-1 ring-border/50 focus-within:ring-primary/30 focus-within:border-primary/50"
+      class="relative flex flex-col overflow-hidden bg-background/80 backdrop-blur-sm shadow-xl transition-all duration-300 ring-1 ring-border/50 focus-within:ring-primary/30 focus-within:border-primary/50"
       :class="mobile ? 'rounded-2xl border-t' : 'border rounded-3xl'"
     >
       <!-- 文件预览区 -->

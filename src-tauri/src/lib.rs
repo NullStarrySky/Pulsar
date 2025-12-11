@@ -85,6 +85,7 @@ pub fn run() {
             secrets_manager::get_all_available_keys,
             secrets_manager::is_key_available,
             secrets_manager::write_secret_key,
+            secrets_manager::delete_secret_key,
             proxy_server::get_proxy_port,
             remote_service::open_remote_window,
             remote_service::send_to_remote_window

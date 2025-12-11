@@ -1,6 +1,6 @@
 // src/features/FileSystem/FileSystem.store.ts
 import { defineStore } from "pinia";
-import { computed, ref, reactive, watch } from "vue";
+import { computed, ref, reactive, watch, Ref } from "vue";
 import {
   readDir,
   exists,
@@ -15,10 +15,16 @@ import {
   stat as fsStat,
   convertFileSrc as tauriConvertFileSrc,
   appDataDir,
+  watch as fsWatch,
 } from "@/features/FileSystem/fs.api";
-import { invoke } from "@tauri-apps/api/core"; // 新增引用
-import { BaseDirectory, type FileInfo } from "@tauri-apps/plugin-fs";
-import { debounce } from "lodash-es";
+import { invoke } from "@tauri-apps/api/core";
+// [新增] 引入 watch 和类型
+import {
+  BaseDirectory,
+  type FileInfo,
+  type WatchEvent,
+} from "@tauri-apps/plugin-fs";
+import { debounce, isEqual } from "lodash-es";
 import urlJoin from "url-join";
 import { FSEventType, fsEmitter } from "./FileSystem.events";
 import type { Setting } from "@/schema/setting/setting.types";
@@ -28,7 +34,6 @@ import {
   SemanticTypeMap,
   getNewTypedFile,
 } from "@/schema/SemanticType";
-// 引入 Task Store
 import { useTaskStore } from "@/features/Task/Task.store";
 
 export const TRASH_DIR_PATH = "trash";
@@ -42,12 +47,10 @@ export type TrashItem = {
   trashedAt: string;
 };
 
-// 递归结构类型定义
 export type FSStructure = {
   [key: string]: FSStructure | (() => any | Promise<any>);
 };
 
-// --- 辅助函数 ---
 const isJsonFile = (path: string) => path.endsWith(".json");
 const isImageFile = (path: string) =>
   /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(path);
@@ -75,9 +78,6 @@ const getUniqueName = (name: string, existingNames: Set<string>): string => {
   return newName;
 };
 
-/**
- * 核心集成逻辑：运行任务包装器
- */
 async function runAsTask<T>(
   name: string,
   signal: AbortSignal | undefined,
@@ -99,6 +99,10 @@ async function runAsTask<T>(
 export abstract class VirtualNode {
   name: string;
   parent: VirtualFolder | null;
+  // [新增] 存储取消监听的函数
+  protected _unwatchFn: (() => void) | null = null;
+
+  public isWatching: Ref<boolean> = ref(false);
 
   constructor(name: string, parent: VirtualFolder | null) {
     this.name = name;
@@ -122,6 +126,99 @@ export abstract class VirtualNode {
     return await fsStat(this.path, { baseDir: BaseDirectory.AppData });
   }
 
+  // [新增] 抽象刷新方法，由子类实现具体逻辑
+  abstract refresh(): Promise<void>;
+
+  // [新增] 监听方法
+  async watch(
+    options: { recursive?: boolean } = { recursive: true }
+  ): Promise<void> {
+    if (this._unwatchFn) {
+      console.warn(`[FS] Already watching ${this.path}`);
+      return;
+    }
+
+    const store = useFileSystemStore();
+    console.log(`[FS] Start watching ${this.path}`);
+
+    try {
+      // 调用 Tauri 插件的 watch 方法
+      this._unwatchFn = await fsWatch(
+        this.path,
+        async (event: WatchEvent) => {
+          // 处理防抖在 fsWatch 内部选项 delayMs 控制，或者在这里进一步处理
+          // 解析事件涉及的路径
+          const paths = event.paths;
+
+          for (const absPath of paths) {
+            // 将绝对路径转换为相对 Store 的路径
+            let relativePath = absPath;
+            if (store.appDataPath && absPath.startsWith(store.appDataPath)) {
+              // 移除 appDataPath 前缀，并处理可能的分隔符
+              relativePath = absPath
+                .slice(store.appDataPath.length)
+                .replace(/^[\/\\]/, ""); // 去除开头的 / 或 \
+            }
+            // windows兼容：将反斜杠转换为正斜杠
+            relativePath = relativePath.replaceAll("\\", "/");
+
+            // 寻找对应的节点
+            const node = store.resolvePath(relativePath);
+
+            if (node) {
+              // 如果节点存在，直接刷新该节点
+              // 如果是文件，会检查内容变更；如果是文件夹，会检查子节点变更
+              try {
+                await node.refresh();
+              } catch (e) {
+                // 如果刷新失败（例如文件刚被删除），尝试刷新其父节点以更新树结构
+                if (node.parent) {
+                  await node.parent.refresh();
+                }
+              }
+            } else {
+              // 如果节点不存在（例如新建文件），找到最近的存在的父目录进行刷新
+              let currentPath = relativePath;
+              while (currentPath.includes("/")) {
+                currentPath = currentPath.substring(
+                  0,
+                  currentPath.lastIndexOf("/")
+                );
+                const parentNode = store.resolvePath(currentPath);
+                if (parentNode && parentNode instanceof VirtualFolder) {
+                  await parentNode.refresh();
+                  break;
+                }
+              }
+              // 如果是根目录下的新文件，直接刷新根
+              if (!currentPath.includes("/")) {
+                await store.root.refresh();
+              }
+            }
+          }
+        },
+        {
+          recursive: options.recursive,
+          baseDir: BaseDirectory.AppData,
+          delayMs: 300, // 防抖，避免短时间多次触发
+        }
+      );
+      this.isWatching.value = true;
+    } catch (error) {
+      console.error(`[FS] Failed to watch ${this.path}:`, error);
+    }
+  }
+
+  // 取消监听
+  unwatch(): void {
+    if (this._unwatchFn) {
+      this._unwatchFn();
+      this._unwatchFn = null;
+      console.log(`[FS] Stopped watching ${this.path}`);
+    }
+    this.isWatching.value = false;
+  }
+
   abstract unload(): void;
   abstract delete(signal?: AbortSignal): Promise<void>;
   abstract rename(newName: string): Promise<void>;
@@ -130,21 +227,13 @@ export abstract class VirtualNode {
     signal?: AbortSignal
   ): Promise<void>;
 
-  /**
-   * 移动节点到目标文件夹
-   * 基类通用实现，支持自动重命名、缓存更新和树结构变更
-   */
   async moveTo(
     targetFolder: VirtualFolder,
     signal?: AbortSignal
   ): Promise<void> {
     return runAsTask(`移动 ${this.name}`, signal, async (s) => {
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
-
-      // 1. 检查：不能移动到自己所在的文件夹
       if (this.parent === targetFolder) return;
-
-      // 2. 检查：如果是文件夹，不能移动到自己的子文件夹中（循环引用）
       if (this instanceof VirtualFolder) {
         let current: VirtualFolder | null = targetFolder;
         while (current) {
@@ -157,52 +246,36 @@ export abstract class VirtualNode {
 
       const store = useFileSystemStore();
       const oldPath = this.path;
-
-      // 3. 处理重名：获取目标目录下的唯一名称
       const existingNames = new Set(targetFolder.children.keys());
       const newName = getUniqueName(this.name, existingNames);
       const newPath = urlJoin(targetFolder.path, newName);
 
-      // 4. 执行物理文件系统移动
       await fsRename(oldPath, newPath, {
         oldPathBaseDir: BaseDirectory.AppData,
         newPathBaseDir: BaseDirectory.AppData,
       });
 
-      // 5. 更新虚拟文件树结构
-      // 从旧父节点移除
       if (this.parent) {
         this.parent.children.delete(this.name);
       }
-
-      // 更新自身属性
       this.name = newName;
       this.parent = targetFolder;
-
-      // 添加到新父节点
       targetFolder.children.set(this.name, this);
 
-      // 6. 更新内容缓存 (Store Cache)
       if (this instanceof VirtualFolder) {
-        // 如果是文件夹，需要查找并更新所有以 oldPath 开头的缓存键
-        // 必须先收集 key 再修改，避免在迭代中修改 Map
         const keysToUpdate: string[] = [];
         for (const key of store.contentCache.keys()) {
-          // 匹配完全相等或子路径 (例如 oldPath/child)
           if (key === oldPath || key.startsWith(oldPath + "/")) {
             keysToUpdate.push(key);
           }
         }
-
         keysToUpdate.forEach((key) => {
           const content = store.contentCache.get(key);
           store.contentCache.delete(key);
-          // 替换路径前缀: oldPath/... -> newPath/...
           const newKey = newPath + key.slice(oldPath.length);
           store.contentCache.set(newKey, content);
         });
       } else {
-        // 如果是文件，直接更新单个条目
         if (store.contentCache.has(oldPath)) {
           const content = store.contentCache.get(oldPath);
           store.contentCache.delete(oldPath);
@@ -210,7 +283,6 @@ export abstract class VirtualNode {
         }
       }
 
-      // 7. 触发事件
       const isDir = this instanceof VirtualFolder;
       fsEmitter.emit(isDir ? FSEventType.DIR_MOVED : FSEventType.FILE_MOVED, {
         oldPath,
@@ -243,9 +315,12 @@ export abstract class VirtualNode {
     });
     await store._writeManifest(manifest);
 
+    // 移动到回收站也会触发 watch 事件，导致节点被删除，这里手动处理是为了保持状态一致性
+    // 如果启用了 watch，这里可能会和 watch 回调竞争，但通常问题不大
     if (this.parent) {
       this.parent.children.delete(this.name);
     }
+    this.unwatch(); // 移动到回收站后停止监听
 
     if (!isDir) {
       store.contentCache.delete(originalPath);
@@ -273,6 +348,37 @@ export class VirtualFile extends VirtualNode {
   get extension(): string {
     const idx = this.name.lastIndexOf(".");
     return idx !== -1 ? this.name.substring(idx) : "";
+  }
+
+  // [新增] 实现文件局部刷新：对比内容，仅在变动时更新缓存
+  async refresh(): Promise<void> {
+    const store = useFileSystemStore();
+    try {
+      let newContent: any;
+      if (isImageFile(this.name)) {
+        newContent = await fsReadFile(this.path, {
+          baseDir: BaseDirectory.AppData,
+        });
+      } else {
+        const text = await readTextFile(this.path, {
+          baseDir: BaseDirectory.AppData,
+        });
+        newContent = isJsonFile(this.name) ? JSON.parse(text) : text;
+      }
+
+      const oldContent = store.contentCache.get(this.path);
+
+      // 使用 lodash 的 isEqual 进行深比较，如果是对象内容相同则不更新引用
+      if (!isEqual(newContent, oldContent)) {
+        store.contentCache.set(this.path, newContent);
+        console.log(`[FS] File content updated via watch: ${this.path}`);
+        fsEmitter.emit(FSEventType.FILE_MODIFIED, { path: this.path });
+      }
+    } catch (error) {
+      console.error(`[FS] Error refreshing file ${this.path}:`, error);
+      // 如果文件读取失败（可能已被删除），抛出异常让 watch 回调去处理父节点刷新
+      throw error;
+    }
   }
 
   async read(force = false): Promise<any> {
@@ -313,6 +419,7 @@ export class VirtualFile extends VirtualNode {
             : String(content);
         await writeTextFile(path, text, { baseDir: BaseDirectory.AppData });
       }
+      // 写入后更新缓存，watch 可能会再次触发 refresh，但 isEqual 会拦截重复更新
       store.contentCache.set(path, content);
       fsEmitter.emit(FSEventType.FILE_MODIFIED, { path });
     } catch (error) {
@@ -323,6 +430,15 @@ export class VirtualFile extends VirtualNode {
 
   async rename(newName: string): Promise<void> {
     if (!this.parent) throw new Error("Cannot rename root file");
+    // 重命名会触发 watch 事件，VirtualNode.rename 已处理大部分逻辑
+    // 为了防止冲突，可以先 unwatch，但这里 watch 绑在 Node 实例上，实例路径变了，
+    // fs plugin 的 watcher 还在监听旧路径还是？通常 fs plugin watch 是按 path 字符串监听的。
+    // 最佳实践：rename 后，旧的 watcher 会失效（因为路径没了），需要重新 watch 新路径吗？
+    // fs plugin watch 机制如果是 inode 绑定则不需要，如果是 path绑定则需要。
+    // 假设是 path 绑定，rename 成功后，建议 restart watch。
+
+    const wasWatching = !!this._unwatchFn;
+    if (wasWatching) this.unwatch();
 
     const store = useFileSystemStore();
     const oldPath = this.path;
@@ -344,6 +460,8 @@ export class VirtualFile extends VirtualNode {
     }
 
     fsEmitter.emit(FSEventType.FILE_RENAMED, { oldPath, newPath });
+
+    if (wasWatching) await this.watch();
   }
 
   async copyTo(
@@ -352,7 +470,6 @@ export class VirtualFile extends VirtualNode {
   ): Promise<void> {
     return runAsTask(`复制文件 ${this.name}`, signal, async (s) => {
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
-
       const store = useFileSystemStore();
       const existingNames = new Set(targetFolder.children.keys());
       const uniqueName = getUniqueName(this.name, existingNames);
@@ -363,6 +480,7 @@ export class VirtualFile extends VirtualNode {
         toPathBaseDir: BaseDirectory.AppData,
       });
 
+      // 新文件会通过 watch 机制自动出现在 targetFolder 中，但为了 UI 响应速度，手动添加
       const newFile = new VirtualFile(uniqueName, targetFolder);
       targetFolder.children.set(uniqueName, newFile);
 
@@ -397,10 +515,6 @@ export class VirtualFile extends VirtualNode {
     });
   }
 
-  /**
-   * 解压缩文件
-   * 仅支持 zip 格式。解压后会刷新整个文件系统树。
-   */
   async decompress(signal?: AbortSignal): Promise<void> {
     if (this.extension !== ".zip") {
       throw new Error("仅支持解压 .zip 文件");
@@ -413,20 +527,19 @@ export class VirtualFile extends VirtualNode {
         ? urlJoin(store.appDataPath, this.path)
         : this.path;
 
-      // 调用后端 decompress 命令
       await invoke("decompress", {
         fromPath: fullPath,
-        // toPath 为空时，默认解压到当前文件所在父目录（类似于 Extract Here）
         toPath: undefined,
       });
-
-      // 解压会产生新的文件/文件夹，需要刷新虚拟文件系统树以同步状态
-      await store.refresh();
+      // 解压会产生大量文件，建议让父文件夹刷新
+      if (this.parent) await this.parent.refresh();
+      else await store.refresh();
       console.log(`[FS] ${this.name} 解压成功`);
     });
   }
 
   unload(): void {
+    this.unwatch(); // 卸载时取消监听
     const store = useFileSystemStore();
     if (store.contentCache.has(this.path)) {
       store.contentCache.delete(this.path);
@@ -444,16 +557,15 @@ export class VirtualFile extends VirtualNode {
 
     this.parent.children.delete(this.name);
     store.contentCache.delete(path);
+    this.unwatch();
 
     fsEmitter.emit(FSEventType.FILE_DELETED, { path });
   }
 
-  // File 节点不支持 createStructure，如果需要统一接口可抛错
   async moveTo(
     targetFolder: VirtualFolder,
     signal?: AbortSignal
   ): Promise<void> {
-    // 复用基类实现
     return super.moveTo(targetFolder, signal);
   }
 }
@@ -463,6 +575,62 @@ export class VirtualFolder extends VirtualNode {
 
   constructor(name: string, parent: VirtualFolder | null) {
     super(name, parent);
+  }
+
+  // [新增] 文件夹局部刷新：同步子目录结构
+  async refresh(): Promise<void> {
+    try {
+      const entries = await readDir(this.path, {
+        baseDir: BaseDirectory.AppData,
+      });
+
+      // 1. 获取当前实际存在的名称集合
+      const currentNames = new Set(entries.map((e) => e.name));
+
+      // 2. 移除已经不存在的节点
+      for (const [name, node] of this.children) {
+        if (!currentNames.has(name) && name !== TRASH_DIR_PATH) {
+          // 清理资源
+          node.unload(); // 会调用 unwatch
+          this.children.delete(name);
+          console.log(`[FS] Removed stale node: ${node.path}`);
+        }
+      }
+
+      // 3. 添加或更新节点
+      for (const entry of entries) {
+        if (entry.name === TRASH_DIR_PATH) continue;
+
+        const name = entry.name!;
+        const existingNode = this.children.get(name);
+
+        if (existingNode) {
+          // 如果类型不匹配（文件变文件夹或反之），则重建
+          const isDir = entry.isDirectory;
+          const isExistingDir = existingNode instanceof VirtualFolder;
+
+          if (isDir !== isExistingDir) {
+            existingNode.unload();
+            const newNode = isDir
+              ? new VirtualFolder(name, this)
+              : new VirtualFile(name, this);
+            this.children.set(name, newNode);
+          }
+          // 如果类型一致，保留现有节点实例，不需要做额外操作
+          // 具体的子内容变化会由子节点的 watch 或递归 refresh 处理
+        } else {
+          // 新增节点
+          const newNode = entry.isDirectory
+            ? new VirtualFolder(name, this)
+            : new VirtualFile(name, this);
+          this.children.set(name, newNode);
+          console.log(`[FS] Detected new node: ${newNode.path}`);
+        }
+      }
+    } catch (error) {
+      console.error(`[FS] Error refreshing dir ${this.path}:`, error);
+      throw error;
+    }
   }
 
   resolve(relativePath: string): VirtualNode | undefined {
@@ -509,11 +677,6 @@ export class VirtualFolder extends VirtualNode {
     return newFile;
   }
 
-  /**
-   * 递归创建子结构
-   * @param structure 目录结构定义对象
-   * @param isForced 是否强制覆盖，默认为 false（跳过已存在的项）
-   */
   async createStructure(
     structure: FSStructure,
     isForced: boolean = false
@@ -522,29 +685,23 @@ export class VirtualFolder extends VirtualNode {
       const existingNode = this.children.get(name);
 
       if (typeof value === "function") {
-        // --- 目标是文件 ---
         if (existingNode) {
           if (existingNode instanceof VirtualFolder) {
             throw new Error(
               `Cannot create file '${name}': A folder with this name already exists.`
             );
           }
-          // 已存在且是文件
           if (isForced) {
             const content = await value();
             await (existingNode as VirtualFile).write(content);
           }
-          // 如果不是强制模式，则跳过
         } else {
-          // 不存在，直接创建
           const content = await value();
           console.log(`try to write: ${content}`);
           await this.createFile(name, content);
         }
       } else {
-        // --- 目标是文件夹 ---
         let targetFolder: VirtualFolder;
-
         if (existingNode) {
           if (existingNode instanceof VirtualFile) {
             throw new Error(
@@ -553,12 +710,8 @@ export class VirtualFolder extends VirtualNode {
           }
           targetFolder = existingNode as VirtualFolder;
         } else {
-          // 不存在则创建
           targetFolder = await this.createDir(name);
         }
-
-        // 递归处理子结构
-        // value 此时被判定为 FSStructure (因为不是 function)
         await targetFolder.createStructure(value as FSStructure, isForced);
       }
     }
@@ -604,9 +757,7 @@ export class VirtualFolder extends VirtualNode {
   async importFile(file: File): Promise<VirtualFile> {
     return runAsTask(`导入 ${file.name}`, undefined, async (s) => {
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
-
       const arrayBuffer = await file.arrayBuffer();
-
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
 
       const uint8Array = new Uint8Array(arrayBuffer);
@@ -625,26 +776,25 @@ export class VirtualFolder extends VirtualNode {
       return await this.createFile(safeName, content);
     });
   }
+
   async rename(newName: string): Promise<void> {
     if (!this.parent) throw new Error("Cannot rename root");
+    const wasWatching = !!this._unwatchFn;
+    if (wasWatching) this.unwatch();
 
     const store = useFileSystemStore();
-    const oldPath = this.path; // 保存旧路径用于计算
+    const oldPath = this.path;
     const newPath = urlJoin(this.parent.path, newName);
 
-    // 1. 物理重命名
     await fsRename(oldPath, newPath, {
       oldPathBaseDir: BaseDirectory.AppData,
       newPathBaseDir: BaseDirectory.AppData,
     });
 
-    // 2. 更新虚拟树结构
     this.parent.children.delete(this.name);
     this.name = newName;
     this.parent.children.set(newName, this);
 
-    // 3. [FIX] 迁移缓存而不是删除缓存
-    // 必须先收集 key，不能在遍历 Map 时修改 Map
     const keysToUpdate: string[] = [];
     for (const key of store.contentCache.keys()) {
       if (key === oldPath || key.startsWith(oldPath + "/")) {
@@ -655,13 +805,12 @@ export class VirtualFolder extends VirtualNode {
     keysToUpdate.forEach((key) => {
       const content = store.contentCache.get(key);
       store.contentCache.delete(key);
-      // 计算新 key: 替换路径前缀
       const newKey = newPath + key.slice(oldPath.length);
       store.contentCache.set(newKey, content);
     });
 
-    // 4. 发出事件
     fsEmitter.emit(FSEventType.DIR_RENAMED, { oldPath, newPath });
+    if (wasWatching) await this.watch();
   }
 
   async copyTo(
@@ -708,11 +857,6 @@ export class VirtualFolder extends VirtualNode {
     });
   }
 
-  /**
-   * 压缩当前文件夹
-   * 默认行为：排除名为 "chat" 的子目录（保护隐私），
-   * 但这不会影响位于其他路径（如 global/template/chat.[chat].json）的模板文件。
-   */
   async compress(signal?: AbortSignal): Promise<void> {
     return runAsTask(`压缩 ${this.name}`, signal, async (s) => {
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
@@ -720,32 +864,23 @@ export class VirtualFolder extends VirtualNode {
       const fullPath = store.appDataPath
         ? urlJoin(store.appDataPath, this.path)
         : this.path;
-
-      // 默认排除项：'chat'
-      // 后端逻辑：将 exclude 列表中的每一项与源路径 join，然后检查 entry.path() 是否以该路径开头。
-      // 效果：如果当前文件夹下有 chat/ 目录，它将被排除。
-      // 注意：'global/template/chat.[chat].json' 不在 'chat/' 目录下，因此不会被排除，符合需求。
       const excludePatterns = ["chat"];
 
       await invoke("compress", {
         fromPath: fullPath,
-        toPath: undefined, // 默认在同级目录生成 zip
+        toPath: undefined,
         exclude: excludePatterns,
       });
 
-      console.log({
-        fromPath: fullPath,
-        toPath: undefined, // 默认在同级目录生成 zip
-        exclude: excludePatterns,
-      });
-
-      // 压缩会生成 .zip 文件，刷新文件系统树以显示它
-      await store.refresh();
+      // 刷新父目录以显示 zip 文件
+      if (this.parent) await this.parent.refresh();
+      else await store.refresh();
       console.log(`[FS] ${this.name} 压缩成功`);
     });
   }
 
   unload(): void {
+    this.unwatch(); // 递归卸载前先停止自身的监听
     for (const child of this.children.values()) {
       child.unload();
     }
@@ -781,7 +916,6 @@ export class VirtualFolder extends VirtualNode {
   async delete(signal?: AbortSignal): Promise<void> {
     return runAsTask(`删除 ${this.name}`, signal, async (s) => {
       if (!this.parent) return;
-
       if (s.aborted) throw new DOMException("Aborted", "AbortError");
 
       const path = this.path;
@@ -790,6 +924,8 @@ export class VirtualFolder extends VirtualNode {
       await fsRemove(path, { baseDir: BaseDirectory.AppData, recursive: true });
 
       this.parent.children.delete(this.name);
+      // 调用 unload 清理子节点监听器
+      this.unload();
 
       for (const key of store.contentCache.keys()) {
         if (key.startsWith(path + "/")) {
@@ -854,12 +990,9 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
       console.error("[FS] Failed to get AppData dir", e);
     }
 
-    // 定义初始文件系统结构
-    // 键为文件名/文件夹名
-    // 值为 FSStructure 对象（代表文件夹）或 返回内容的函数（代表文件）
     const initialStructure: FSStructure = {
       global: {
-        template: {}, // 递归创建 global/template
+        template: {},
         preset: {},
         lorebook: {},
         background: {},
@@ -870,24 +1003,20 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
       plugin: {},
       executable: {},
       trash: {},
-      // 如果文件不存在，调用函数获取默认内容并写入
       [SETTING_PATH]: () => getNewTypedFile("setting"),
       [MODEL_CONFIG_PATH]: () => getNewTypedFile("modelConfig"),
     };
 
-    // 构建内存中的虚拟文件树
     const newRoot = new VirtualFolder("", null);
     await _buildTreeRecursively("", newRoot);
     root.value = newRoot;
 
     try {
-      // isForced = false: 仅当文件/文件夹不存在时才创建，避免覆盖用户数据
       await newRoot.createStructure(initialStructure, false);
     } catch (e) {
       console.error("[FS] Failed to initialize file structure", e);
     }
 
-    // 预加载关键配置文件
     const settingFile = newRoot.resolve(SETTING_PATH);
     if (settingFile instanceof VirtualFile) await settingFile.read();
 
@@ -978,33 +1107,20 @@ export const useFileSystemStore = defineStore("newFileSystem", () => {
     return root.value.resolve(path);
   };
 
-  /**
-   * 通用方法：解析给定路径所属的“包”根文件夹
-   * “包”的定义是：该文件夹下包含 manifest.[manifest].json
-   * @param path 任意文件或文件夹路径
-   */
   const resolvePackageFolder = (path: string): VirtualFolder => {
-    // 1. 解析当前节点
     const node = root.value.resolve(path);
     if (!node) {
       throw new Error(`Path does not exist: ${path}`);
     }
 
-    // 2. 确定起始遍历的文件夹
     let currentFolder: VirtualFolder | null =
       node instanceof VirtualFolder ? node : node.parent;
 
-    // 3. 向上遍历寻找 manifest
     while (currentFolder) {
-      // 检查当前文件夹是否存在 manifest 文件
       if (currentFolder.children.has("manifest.[manifest].json")) {
         return currentFolder;
       }
-
-      // 如果已经到达根目录仍未找到，停止
       if (!currentFolder.parent) break;
-
-      // 继续向上
       currentFolder = currentFolder.parent;
     }
 

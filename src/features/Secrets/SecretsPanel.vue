@@ -6,7 +6,7 @@ import { useSecretsStore } from "./Secrets.store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge"; // 新增 Badge 组件
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -14,7 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { KeyIcon, PlusIcon, ShieldCheckIcon } from "lucide-vue-next";
+import {
+  KeyIcon,
+  PlusIcon,
+  ShieldCheckIcon,
+  Trash2Icon,
+} from "lucide-vue-next";
 import { cn } from "@/lib/utils";
 import { AcceptableValue } from "reka-ui";
 
@@ -26,8 +31,11 @@ const newKeyName = ref("");
 const newKeyValue = ref("");
 const selectedPreset = ref("");
 
+// 加载状态，用于删除按钮的 loading 效果（可选）
+const processingKey = ref<string | null>(null);
+
 const PRESET_KEYS = [
-  { label: "自定义", value: "CUSTOM" }, // 修改 value 为非空字符串方便 Select 处理，逻辑中再转换
+  { label: "自定义", value: "CUSTOM" },
   { label: "Exa Search", value: "EXA_API_KEY" },
   { label: "Firecrawl", value: "FIRECRAWL_API_KEY" },
   { label: "OpenAI", value: "OPENAI_API_KEY" },
@@ -39,7 +47,6 @@ onMounted(() => {
 
 function handlePresetChange(value: AcceptableValue) {
   selectedPreset.value = String(value);
-  // 如果是 CUSTOM (之前定义的占位符)，则清空
   newKeyName.value = value === "CUSTOM" ? "" : String(value);
 }
 
@@ -51,13 +58,30 @@ async function handleSave() {
   try {
     await store.writeSecretKey(newKeyName.value, newKeyValue.value);
     push.success({ message: "密钥保存成功" });
-    // 重置表单
     isCreating.value = false;
     newKeyName.value = "";
     newKeyValue.value = "";
     selectedPreset.value = "";
   } catch (e) {
     push.error({ message: "保存失败" });
+  }
+}
+
+// [新增] 删除处理函数
+async function handleDelete(keyName: string) {
+  // 简单的确认逻辑，也可以换成 Dialog 组件
+  if (!confirm(`确定要删除密钥 "${keyName}" 吗？此操作不可恢复。`)) {
+    return;
+  }
+
+  processingKey.value = keyName;
+  try {
+    await store.deleteSecretKey(keyName);
+    push.success({ message: "密钥已删除" });
+  } catch (e) {
+    push.error({ message: "删除失败" });
+  } finally {
+    processingKey.value = null;
   }
 }
 </script>
@@ -83,7 +107,6 @@ async function handleSave() {
     </div>
 
     <!-- Create Form Area -->
-    <!-- 使用 bg-muted/40 稍微区分背景，增加 border-b -->
     <div
       v-if="isCreating"
       class="p-3 bg-muted/40 border-b border-border animate-in slide-in-from-top-2 fade-in-20 duration-200"
@@ -164,30 +187,47 @@ async function handleSave() {
         :key="keyName"
         :class="
           cn(
-            'flex items-center justify-between p-2 rounded-md',
+            'flex items-center justify-between p-2 pl-3 rounded-md',
             'border border-border/50 bg-card',
-            'hover:bg-accent hover:text-accent-foreground transition-colors group'
+            // 移除 hover:text-accent-foreground，防止文字颜色在 hover 时变化太大影响阅读
+            'hover:bg-accent/50 transition-colors group'
           )
         "
       >
+        <!-- 左侧：图标 + 键名 -->
         <div class="flex items-center gap-2.5 overflow-hidden">
-          <!-- 图标颜色使用 text-primary 或者专用的 success 颜色，这里保持绿色但调整透明度使其柔和 -->
           <ShieldCheckIcon
             class="w-4 h-4 text-emerald-600 dark:text-emerald-500 shrink-0"
           />
-          <span class="truncate font-medium font-mono text-xs" :title="keyName">
+          <span
+            class="truncate font-medium font-mono text-xs text-foreground"
+            :title="keyName"
+          >
             {{ keyName }}
           </span>
         </div>
 
-        <!-- 使用 Badge 组件 -->
-        <Badge
-          v-if="['EXA_API_KEY', 'FIRECRAWL_API_KEY'].includes(keyName)"
-          variant="secondary"
-          class="text-[10px] px-1.5 py-0 h-5 font-normal tracking-wide shrink-0"
-        >
-          WEB
-        </Badge>
+        <!-- 右侧：Badge + 删除按钮 -->
+        <div class="flex items-center gap-2 shrink-0">
+          <Badge
+            v-if="['EXA_API_KEY', 'FIRECRAWL_API_KEY'].includes(keyName)"
+            variant="secondary"
+            class="text-[10px] px-1.5 py-0 h-5 font-normal tracking-wide"
+          >
+            WEB
+          </Badge>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive"
+            :disabled="processingKey === keyName"
+            @click="handleDelete(keyName)"
+            title="删除密钥"
+          >
+            <Trash2Icon class="w-3.5 h-3.5" />
+          </Button>
+        </div>
       </div>
     </div>
   </div>

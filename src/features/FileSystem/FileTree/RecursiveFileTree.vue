@@ -208,6 +208,8 @@ const startCreate = (type: "file" | "directory", parentPath: string) => {
                     "
                     @compress="ops.handleCompress(item.path)"
                     @decompress="ops.handleDecompress(item.path)"
+                    @reveal-in-explorer="ops.handleOpenInExplorer(item.path)"
+                    @open-default="ops.handleOpenWithDefault(item.path)"
                   />
                 </div>
               </li>

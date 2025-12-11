@@ -8,6 +8,7 @@ import {
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import join from "url-join";
 import type { SemanticType } from "@/schema/SemanticType";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
 export function useFileOperations() {
   const store = useFileSystemStore();
@@ -145,6 +146,29 @@ export function useFileOperations() {
     }
   };
 
+  // 在资源管理器中显示
+  const handleOpenInExplorer = async (path: string) => {
+    if (!store.appDataPath) return;
+    try {
+      // 拼接绝对路径
+      const absPath = join(store.appDataPath, path);
+      await revealItemInDir(absPath);
+    } catch (error) {
+      console.error("Failed to reveal item:", error);
+    }
+  };
+
+  // 以默认应用打开
+  const handleOpenWithDefault = async (path: string) => {
+    if (!store.appDataPath) return;
+    try {
+      const absPath = join(store.appDataPath, path);
+      await openPath(absPath);
+    } catch (error) {
+      console.error("Failed to open item:", error);
+    }
+  };
+
   // --- Utils ---
 
   const copyPathToClipboard = async (
@@ -206,6 +230,8 @@ export function useFileOperations() {
     executePermanentDelete,
     copyPathToClipboard,
     handleCompress,
+    handleOpenInExplorer,
+    handleOpenWithDefault,
     handleDecompress,
   };
 }

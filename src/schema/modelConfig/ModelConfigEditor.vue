@@ -313,16 +313,36 @@ async function checkKeyStatus() {
 }
 
 async function handleWriteKey() {
+  // 校验输入
   if (!selectedProviderData.value?.apiKeyName || !apiKeyInputValue.value)
     return;
+
   const keyName = selectedProviderData.value.apiKeyName.trim();
   const keyValue = apiKeyInputValue.value;
+
   try {
+    // 调用 Store 写入密钥
     await keyStore.writeSecretKey(keyName, keyValue);
+
+    // 清空输入框
     apiKeyInputValue.value = "";
+
+    // 刷新当前密钥的可用状态 (更新 UI 徽章)
     await checkKeyStatus();
+
+    // Notivue 成功反馈
+    push.success({
+      title: "密钥保存成功",
+      message: `密钥 "${keyName}" 已成功保存并刷新状态。`,
+    });
   } catch (error) {
     console.error("Failed to write secret key:", error);
+
+    // Notivue 失败反馈
+    push.error({
+      title: "密钥保存失败",
+      message: (error as Error).message || "发生未知错误，请检查日志。",
+    });
   }
 }
 

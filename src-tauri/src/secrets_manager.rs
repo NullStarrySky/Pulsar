@@ -79,6 +79,19 @@ pub fn write_secret_key(app: AppHandle, key: String, value: String) -> Result<()
     write_secrets(&app, &secrets).map_err(|e| e.to_string())
 }
 
+// 删除密钥命令
+#[tauri::command]
+pub fn delete_secret_key(app: AppHandle, key: String) -> Result<(), String> {
+    let mut secrets = read_secrets(&app).map_err(|e| e.to_string())?;
+
+    // 如果键存在，则移除并保存文件
+    if secrets.remove(&key).is_some() {
+        write_secrets(&app, &secrets).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn is_key_available(app: AppHandle, key: String) -> Result<bool, String> {
     let secrets = read_secrets(&app).map_err(|e| e.to_string())?;

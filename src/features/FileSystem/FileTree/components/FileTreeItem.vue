@@ -19,6 +19,10 @@ import {
   Image as ImageIcon,
   Archive, // 用于压缩
   ArchiveRestore,
+  Eye, // [新增] 引入眼睛图标
+  EyeOff, // [新增] 引入关闭眼睛图标
+  MonitorPlay, // [新增] 用于菜单图标
+  MonitorStop,
 } from "lucide-vue-next";
 import {
   ContextMenu,
@@ -33,11 +37,14 @@ import {
 import { useFileOperations } from "../composables/useFileOperations";
 import { SemanticTypeMap, type SemanticType } from "@/schema/SemanticType";
 import type { FlatTreeItem } from "../composables/useFileTree";
+import { useFileSystemStore } from "../..";
 
 const props = defineProps<{
   item: FlatTreeItem;
   canPaste: boolean;
 }>();
+
+const store = useFileSystemStore();
 
 // --- 更新 emits，添加 compress 和 decompress ---
 defineEmits<{
@@ -56,6 +63,8 @@ defineEmits<{
   // 新增事件
   (e: "compress"): void;
   (e: "decompress"): void;
+  (e: "reveal-in-explorer"): void;
+  (e: "open-default"): void;
 }>();
 
 const ops = useFileOperations();
@@ -108,6 +117,26 @@ const displayName = computed(() => {
 const isZipFile = computed(() => {
   return !props.item.isFolder && props.item.name.toLowerCase().endsWith(".zip");
 });
+
+// 获取当前节点是否正在被监听
+// 注意：props.item 是扁平化的快照，不一定包含响应式状态，所以通过 path 从 store 拿最新的 node
+const isWatching = computed(() => {
+  const node = store.resolvePath(props.item.path);
+  // 访问 Ref .value
+  return node ? node.isWatching.value : false;
+});
+
+// 处理监听切换
+const toggleWatch = async () => {
+  const node = store.resolvePath(props.item.path);
+  if (!node) return;
+
+  if (node.isWatching.value) {
+    node.unwatch();
+  } else {
+    await node.watch();
+  }
+};
 </script>
 
 <template>
@@ -141,6 +170,13 @@ const isZipFile = computed(() => {
 
         <!-- Name: 使用 displayName 替换 item.name -->
         <span class="truncate" :title="item.name">{{ displayName }}</span>
+        <div
+          v-if="isWatching"
+          class="ml-auto flex items-center pl-2"
+          title="正在监听文件变更"
+        >
+          <Eye class="h-3.5 w-3.5 text-blue-500 animate-pulse" />
+        </div>
       </div>
     </ContextMenuTrigger>
 
@@ -169,6 +205,23 @@ const isZipFile = computed(() => {
           </ContextMenuItem>
         </ContextMenuSubContent>
       </ContextMenuSub>
+      <ContextMenuSeparator />
+      <ContextMenuItem @select="toggleWatch">
+        <component
+          :is="isWatching ? MonitorStop : MonitorPlay"
+          class="mr-2 h-4 w-4"
+        />
+        {{ isWatching ? "停止监听" : "开始监听" }}
+      </ContextMenuItem>
+
+      <ContextMenuSeparator />
+
+      <ContextMenuItem @select="$emit('open-default')">
+        <ExternalLink class="mr-2 h-4 w-4" />以默认方式打开
+      </ContextMenuItem>
+      <ContextMenuItem @select="$emit('reveal-in-explorer')">
+        <FolderSymlink class="mr-2 h-4 w-4" />在资源管理器中打开
+      </ContextMenuItem>
 
       <ContextMenuSeparator />
 
