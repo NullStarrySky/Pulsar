@@ -1,19 +1,19 @@
 // src/schema/chat/chat.ts
 
+import { merge } from "lodash-es";
+import { nanoid } from "nanoid";
 import type { SchemaDefinition } from "../SemanticType";
+import type { role } from "../shared.types.ts";
 import ChatEditor from "./ChatEditor.vue";
 // 注意: 类型定义对于 newChat 函数和 SchemaDefinition 仍然是必需的
-import { RootChat } from "./chat.types";
-import { nanoid } from "nanoid";
-import { merge } from "lodash-es";
 import type {
-  MetaGenerateInfo,
-  MessageAlternative,
+  Alternative,
   BranchAlternative,
   ChatMessageItem,
-  Alternative,
+  MessageAlternative,
+  MetaGenerateInfo,
+  RootChat,
 } from "./chat.types";
-import type { role } from "../shared.types.ts";
 
 /**
  * 创建一个新的、空的聊天对象。

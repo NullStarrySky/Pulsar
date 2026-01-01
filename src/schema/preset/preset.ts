@@ -1,13 +1,13 @@
 // src/schema/preset/preset.ts
 
 import { v4 as uuidv4 } from "uuid";
-import { SchemaDefinition } from "../SemanticType";
 import { executeCode } from "@/lib/ExpressionEngine";
-import { MultiDepthInjection } from "../chat/EnhancedApiReadyContext";
-import { ApiReadyMessage } from "../chat/chat.types";
-import { ExecuteContext } from "../shared.types";
+import type { ApiReadyMessage } from "../chat/chat.types";
+import type { MultiDepthInjection } from "../chat/EnhancedApiReadyContext";
+import type { SchemaDefinition } from "../SemanticType";
+import type { ExecuteContext } from "../shared.types";
 import { presetSchema } from "./preset.schema";
-import { Prompt, Preset } from "./preset.types.ts";
+import type { Preset, Prompt } from "./preset.types.ts";
 
 /**
  * 分离提示词模版，生成可注入的消息组。

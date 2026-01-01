@@ -1,30 +1,31 @@
-import { computed, toValue, type MaybeRef, reactive } from "vue";
-import {
-  type RootChat,
-  type FlattenedChat,
-  type Alternative,
-  type MetaGenerateInfo,
-  type ApiReadyContext,
-  type FlatChatMessage, // 导入此类型
-} from "./chat.types";
-import { role } from "../shared.types";
+// src/schema/chat/useFlattenedChat.ts
+
 import { cloneDeep, merge } from "lodash-es";
 import { nanoid } from "nanoid";
-import { EnhancedApiReadyContext } from "./EnhancedApiReadyContext";
+import { computed, type MaybeRef, reactive, toValue } from "vue";
+import type { role } from "../shared.types";
+import {
+  createBranchAlternative,
+  createMessageAlternative,
+  createMessageContainer,
+} from "./chat";
+import type {
+  Alternative,
+  ApiReadyContext,
+  FlatChatMessage, // 导入此类型
+  FlattenedChat,
+  MetaGenerateInfo,
+  RootChat,
+} from "./chat.types";
 
 // 引入拆分出的模块
 import {
-  recursiveFlatten,
-  findContainerByPath,
-  findActiveLeafContainer,
   createChatContext,
+  findActiveLeafContainer,
+  findContainerByPath,
+  recursiveFlatten,
 } from "./chat.utils";
-
-import {
-  createMessageAlternative,
-  createBranchAlternative,
-  createMessageContainer,
-} from "./chat";
+import { EnhancedApiReadyContext } from "./EnhancedApiReadyContext";
 
 export function useFlattenedChat(chatRef: MaybeRef<RootChat | null>) {
   // 1. 核心计算属性：压平聊天记录

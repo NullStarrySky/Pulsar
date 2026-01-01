@@ -1,6 +1,7 @@
+// src/schema/setting/setting.types.ts
 import type { ChatMessageItem, messageId } from "../chat/chat.types";
-import type { RegexRule } from "../shared.types";
 import type { LorebookSetting } from "../lorebook/lorebook.types";
+import type { RegexRule } from "../shared.types";
 
 /**
  * 知识库相关的全局设置。

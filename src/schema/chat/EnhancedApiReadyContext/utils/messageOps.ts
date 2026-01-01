@@ -1,11 +1,11 @@
 // src/schema/chat/EnhancedApiReadyContext/utils/messageOps.ts
-import { ApiReadyMessage } from "@/schema/chat/chat.types";
-import {
-  SquashConfig,
-  MultiDepthInjection,
+import type { ApiReadyMessage } from "@/schema/chat/chat.types";
+import type { RegexRule } from "@/schema/shared.types";
+import type {
   ContentReplacer,
+  MultiDepthInjection,
+  SquashConfig,
 } from "../api.types";
-import { RegexRule } from "@/schema/shared.types";
 
 /** 归一化消息输入 */
 const normalizeMsg = (msg: ApiReadyMessage | string): ApiReadyMessage =>

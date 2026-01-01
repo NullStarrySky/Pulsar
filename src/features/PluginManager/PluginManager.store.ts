@@ -1,19 +1,19 @@
 // src/features/PluginManager/PluginManager.store.ts
 //TODO: 这个store暂时没啥用处，等我把常用的插件都吃了再仔细考虑这东西
 
+import { BaseDirectory } from "@tauri-apps/plugin-fs";
 // src/features/Plugin/Plugin.store.ts
 import { defineStore } from "pinia";
+import urlJoin from "url-join";
 import { ref } from "vue";
+import { useFileSystemStore } from "@/features/FileSystem/FileSystem.store";
 import {
-  readDir,
   exists,
   mkdir,
+  readDir,
   readTextFile,
   writeTextFile,
 } from "@/features/FileSystem/fs.api";
-import { BaseDirectory } from "@tauri-apps/plugin-fs";
-import urlJoin from "url-join";
-import { useFileSystemStore } from "@/features/FileSystem/FileSystem.store";
 
 // --- 插件相关类型 ---
 export interface PluginManifest {

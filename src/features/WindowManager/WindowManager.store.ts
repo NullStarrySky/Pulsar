@@ -1,18 +1,19 @@
 // src/features/WindowManager/WindowManager.store.ts
 // TODO：这东西需要一个panel吗？有点纠结
 // ？？？
-import { defineStore } from "pinia";
-import { ref, computed } from "vue";
-import {
-  WebviewWindow,
-  getCurrentWebviewWindow,
-} from "@tauri-apps/api/webviewWindow";
-import { v4 as uuid } from "uuid";
-import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Position } from "@tauri-apps/plugin-positioner";
-import type { WebviewOptions } from "@tauri-apps/api/webview";
-import type { WindowOptions } from "@tauri-apps/api/window";
+
 import { invoke } from "@tauri-apps/api/core";
+import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { WebviewOptions } from "@tauri-apps/api/webview";
+import {
+  getCurrentWebviewWindow,
+  WebviewWindow,
+} from "@tauri-apps/api/webviewWindow";
+import type { WindowOptions } from "@tauri-apps/api/window";
+import type { Position } from "@tauri-apps/plugin-positioner";
+import { defineStore } from "pinia";
+import { v4 as uuid } from "uuid";
+import { computed, ref } from "vue";
 // 引入 FS Store 仅为了获取当前激活文件路径，避免循环依赖
 import { useUIStore } from "@/features/UI/UI.store";
 

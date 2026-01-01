@@ -1,3 +1,4 @@
+<!-- src/schema/modelConfig/components/ProviderModelsTable.vue -->
 <template>
   <div>
     <Card>

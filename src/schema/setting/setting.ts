@@ -1,6 +1,7 @@
+// src/schema/setting/setting.ts
 import type { SchemaDefinition } from "@/schema/SemanticType";
 import { getSettingSchema } from "./setting.schema";
-import { Setting } from "./setting.types";
+import type { Setting } from "./setting.types";
 
 /**
  * 为 setting.json 创建一个包含所有默认值的对象。

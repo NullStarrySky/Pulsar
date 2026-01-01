@@ -1,9 +1,9 @@
 // src/features/FileSystem/FileTree/composables/useFileTree.ts
-import { ref, computed, watch, onMounted, type Ref } from "vue";
+import { computed, onMounted, type Ref, ref, watch } from "vue";
 import {
   useFileSystemStore,
+  type VirtualFile,
   VirtualFolder,
-  VirtualFile,
 } from "@/features/FileSystem/FileSystem.store";
 
 export interface FlatTreeItem {

@@ -1,15 +1,16 @@
 // src/features/FileSystem/FileTree/composables/useFileOperations.ts
+
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import join from "url-join";
 import { ref } from "vue";
 import {
-  FileSignal,
+  type FileSignal,
   useFileSystemStore,
   VirtualFile,
   VirtualFolder,
 } from "@/features/FileSystem/FileSystem.store";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import join from "url-join";
 import type { SemanticType } from "@/schema/SemanticType";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
 export function useFileOperations() {
   const store = useFileSystemStore();

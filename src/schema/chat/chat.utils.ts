@@ -1,23 +1,23 @@
 // src/schema/chat/chat.utils.ts
 import { cloneDeep } from "lodash-es";
-import {
-  type RootChat,
-  type ChatMessageItem,
-  type VariableChange,
-  type AttachedIntervalDef,
-  type AttachedEndMarkerDef,
-  type ResolvedInterval,
-  type ApiReadyMessage,
-  type ApiReadyContext,
-  type FlatChatMessage,
-  type PathInfo,
+import type {
+  ApiReadyContext,
+  ApiReadyMessage,
+  AttachedEndMarkerDef,
+  AttachedIntervalDef,
+  ChatMessageItem,
+  FlatChatMessage,
+  PathInfo,
+  ResolvedInterval,
+  RootChat,
+  VariableChange,
 } from "./chat.types";
 import { EnhancedApiReadyContext } from "./EnhancedApiReadyContext/EnhancedApiReadyContext";
 
 // ========== 变量与状态处理 ==========
 
 // 获取 AsyncFunction 构造器用于动态执行
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
 
 /**
  * 动态执行用户提供的代码片段。

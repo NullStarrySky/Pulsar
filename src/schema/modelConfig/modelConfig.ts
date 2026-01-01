@@ -1,13 +1,13 @@
 // src/schema/modelConfig/modelConfig.ts
 import type { SchemaDefinition } from "@/schema/SemanticType";
+import ModelConfigEditor from "./ModelConfigEditor.vue";
+
+import { getAllProviderModels } from "./modelConfig.models";
 import type {
   ModelConfig,
   ProviderData,
   ProviderMetadata,
 } from "./modelConfig.types";
-
-import { getAllProviderModels } from "./modelConfig.models";
-import ModelConfigEditor from "./ModelConfigEditor.vue";
 
 /**
  * 创建一个空的 modelConfig 对象。

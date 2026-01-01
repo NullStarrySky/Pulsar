@@ -1,19 +1,19 @@
 <!-- src/schema/chat/ChatBubble.vue -->
 <script lang="ts">
-import { type InjectionKey, type Ref, inject } from "vue";
+import { type InjectionKey, inject, type Ref } from "vue";
 import type { FlatChatMessage } from "./chat.types";
 export interface MessageContext {
-  message: Ref<FlatChatMessage>;
-  index: Ref<number>;
-  updateContent: (newContent: string) => void;
-  dispatchAction: (action: string) => void;
+	message: Ref<FlatChatMessage>;
+	index: Ref<number>;
+	updateContent: (newContent: string) => void;
+	dispatchAction: (action: string) => void;
 }
 export const MessageContextKey: InjectionKey<MessageContext> =
-  Symbol("MessageContext");
+	Symbol("MessageContext");
 export function useMessageContext() {
-  const context = inject(MessageContextKey);
-  if (!context) throw new Error("useMessageContext missing");
-  return context;
+	const context = inject(MessageContextKey);
+	if (!context) throw new Error("useMessageContext missing");
+	return context;
 }
 </script>
 
@@ -122,7 +122,7 @@ function handleCopy() {
   }
 }
 
-// Provide Context (保持不变)
+// Provide Context
 const messageRef = toRef(props, "message");
 const indexRef = toRef(props, "index");
 provide(MessageContextKey, {

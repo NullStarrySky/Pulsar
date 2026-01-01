@@ -1,28 +1,27 @@
+<!-- src/schema/chat/ChatEditor.vue -->
 <script setup lang="ts">
-import { computed, onMounted, type CSSProperties, nextTick, ref } from "vue";
+import { ArrowDown } from "lucide-vue-next";
 import { push } from "notivue";
-
+import { type CSSProperties, computed, nextTick, onMounted, ref } from "vue";
+import { Button } from "@/components/ui/button";
+// Components
+import { ScrollArea } from "@/components/ui/scroll-area";
 // Features & Composables
 import { useFileContent } from "@/features/FileSystem/composables/useFileContent";
 import { useResources } from "@/schema/manifest/composables/useResources.ts";
-import { useFlattenedChat } from "./useFlattenedChat";
-import { useChatScroll } from "./composables/useChatScroll";
-
+import { isMobile } from "@/utils/platform";
+import { type role } from "../shared.types";
+import ChatBubble from "./ChatBubble.vue";
+import ChatInputArea from "./ChatInputArea.vue";
 // Types
 import {
-  type RootChat,
-  type AdditionalParts,
-  type FlatChatMessage,
+	type AdditionalParts,
+	type FlatChatMessage,
+	type RootChat,
 } from "./chat.types";
-import { type role } from "../shared.types";
+import { useChatScroll } from "./composables/useChatScroll";
+import { useFlattenedChat } from "./useFlattenedChat";
 
-// Components
-import { ScrollArea } from "@/components/ui/scroll-area";
-import ChatInputArea from "./ChatInputArea.vue";
-import { Button } from "@/components/ui/button";
-import { ArrowDown } from "lucide-vue-next";
-import ChatBubble from "./ChatBubble.vue";
-import { isMobile } from "@/utils/platform";
 const mobile = isMobile(); // 获取移动端状态
 
 const props = defineProps<{ path: string }>();
@@ -32,30 +31,30 @@ const pathRef = computed(() => props.path);
 const chatReactive = useFileContent<RootChat>(pathRef);
 
 const {
-  flattenedChat,
-  switchAlternative,
-  deleteContainer,
-  fork,
-  appendMessage,
-  appendMessageToLeaf, // 重点使用这个
-  addBlankMessage,
-  setMessageContent,
-  generate,
-  addBlankBranch,
-  polish,
-  renameAlternative,
+	flattenedChat,
+	switchAlternative,
+	deleteContainer,
+	fork,
+	appendMessage,
+	appendMessageToLeaf, // 重点使用这个
+	addBlankMessage,
+	setMessageContent,
+	generate,
+	addBlankBranch,
+	polish,
+	renameAlternative,
 } = useFlattenedChat(chatReactive);
 
 const { isAtBottom, scrollToBottom, handleScroll } = useChatScroll(
-  computed(() => flattenedChat.value.messages.length)
+	computed(() => flattenedChat.value.messages.length),
 );
 onMounted(() => scrollToBottom("auto"));
 const inputAreaRef = ref();
 
 const {
-  avatar: resourceAvatar,
-  getExecuteContextSnapshot,
-  background,
+	avatar: resourceAvatar,
+	getExecuteContextSnapshot,
+	background,
 } = useResources(pathRef);
 
 // --- Scroll Logic ---
@@ -66,150 +65,150 @@ onMounted(() => scrollToBottom("auto"));
 
 // 通用动作分发器
 function handleMessageAction(action: string, msg: FlatChatMessage) {
-  switch (action) {
-    case "regenerate":
-      handleGenerate(msg);
-      break;
-    case "delete":
-      deleteContainer(msg);
-      break;
-    case "branch":
-      addBlankBranch(msg, true);
-      break;
-    case "add-new":
-      addBlankMessage(msg, true);
-      break;
-    case "polish":
-      handlePolishAction({ item: msg });
-      break;
-    case "fork":
-      fork(msg);
-      break;
-    case "insert":
-      appendMessage(msg);
-      break;
-    case "copy":
-      const content = msg.content;
-      if (content?.type === "message")
-        navigator.clipboard.writeText(content.content);
-      push.success("已复制到剪贴板");
-      break;
-  }
+	switch (action) {
+		case "regenerate":
+			handleGenerate(msg);
+			break;
+		case "delete":
+			deleteContainer(msg);
+			break;
+		case "branch":
+			addBlankBranch(msg, true);
+			break;
+		case "add-new":
+			addBlankMessage(msg, true);
+			break;
+		case "polish":
+			handlePolishAction({ item: msg });
+			break;
+		case "fork":
+			fork(msg);
+			break;
+		case "insert":
+			appendMessage(msg);
+			break;
+		case "copy": {
+			const content = msg.content;
+			if (content?.type === "message")
+				navigator.clipboard.writeText(content.content);
+			push.success("已复制到剪贴板");
+			break;
+		}
+	}
 }
 
 // 润色逻辑
 async function handlePolishAction(
-  target: { item: FlatChatMessage } | { content: string; role: role }
+	target: { item: FlatChatMessage } | { content: string; role: role },
 ) {
-  if (!chatReactive.value) return;
-  try {
-    const { CHAT, container, intention, remove } = await polish(target);
-    const finalContext = {
-      ...getExecuteContextSnapshot(),
-      CHAT,
-      intention,
-      container,
-      remove,
-      CTX: null as any,
-    };
-    finalContext.CTX = finalContext;
-    await nextTick();
+	if (!chatReactive.value) return;
+	try {
+		const { CHAT, container, intention, remove } = await polish(target);
+		const finalContext = {
+			...getExecuteContextSnapshot(),
+			CHAT,
+			intention,
+			container,
+			remove,
+			CTX: null as any,
+		};
+		finalContext.CTX = finalContext;
+		await nextTick();
 
-    if (finalContext.PRESET?.generate) {
-      if (!("item" in target)) {
-        // 如果是输入框润色，监听变化回填
-        const { watch } = await import("vue");
-        const unwatch = watch(
-          () => container.alternatives[container.activeAlternative].content,
-          (val) => inputAreaRef.value?.setDraft(val)
-        );
-        await finalContext.PRESET.generate(finalContext);
-        unwatch();
-      } else {
-        await finalContext.PRESET.generate(finalContext);
-      }
-      push.success({ title: "润色完成" });
-    }
-  } catch (err) {
-    console.error(err);
-    push.error({ title: "润色失败", message: (err as Error).message });
-  }
+		if (finalContext.PRESET?.generate) {
+			if (!("item" in target)) {
+				// 如果是输入框润色，监听变化回填
+				const { watch } = await import("vue");
+				const unwatch = watch(
+					() => container.alternatives[container.activeAlternative].content,
+					(val) => inputAreaRef.value?.setDraft(val),
+				);
+				await finalContext.PRESET.generate(finalContext);
+				unwatch();
+			} else {
+				await finalContext.PRESET.generate(finalContext);
+			}
+			push.success({ title: "润色完成" });
+		}
+	} catch (err) {
+		console.error(err);
+		push.error({ title: "润色失败", message: (err as Error).message });
+	}
 }
 
 // 生成逻辑
 async function handleGenerate(msg?: FlatChatMessage) {
-  if (!chatReactive.value) return;
-  const ctx = { ...getExecuteContextSnapshot(), ...(await generate(msg)) };
-  // @ts-ignore
-  ctx.CTX = ctx;
+	if (!chatReactive.value) return;
+	const ctx = { ...getExecuteContextSnapshot(), ...(await generate(msg)) };
+	ctx.CTX = ctx;
 
-  try {
-    if (ctx.PRESET?.generate) {
-      await ctx.PRESET.generate(ctx);
-    } else {
-      push.error("当前预设不支持生成");
-    }
-  } catch (e) {
-    push.error({ title: "生成错误", message: (e as Error).message });
-  }
+	try {
+		if (ctx.PRESET?.generate) {
+			await ctx.PRESET.generate(ctx);
+		} else {
+			push.error("当前预设不支持生成");
+		}
+	} catch (e) {
+		push.error({ title: "生成错误", message: (e as Error).message });
+	}
 }
 
 // 修改 onSend 逻辑以支持 generate 参数
 async function onSend(
-  content: string,
-  files: File[],
-  role: role,
-  shouldGenerate: boolean
+	content: string,
+	files: File[],
+	role: role,
+	shouldGenerate: boolean,
 ) {
-  const parts: AdditionalParts[] = [];
-  for (const f of files) {
-    const buffer = await f.arrayBuffer();
-    parts.push({
-      type: f.type.startsWith("image/") ? "image" : "file",
-      [f.type.startsWith("image/") ? "image" : "data"]: buffer,
-      mediaType: f.type,
-      filename: f.name,
-    } as any);
-  }
+	const parts: AdditionalParts[] = [];
+	for (const f of files) {
+		const buffer = await f.arrayBuffer();
+		parts.push({
+			type: f.type.startsWith("image/") ? "image" : "file",
+			[f.type.startsWith("image/") ? "image" : "data"]: buffer,
+			mediaType: f.type,
+			filename: f.name,
+		} as any);
+	}
 
-  // 核心修改：支持不同角色插入
-  appendMessageToLeaf(content, role, {
-    additionalParts: parts.length ? parts : undefined,
-  });
+	// 核心修改：支持不同角色插入
+	appendMessageToLeaf(content, role, {
+		additionalParts: parts.length ? parts : undefined,
+	});
 
-  if (shouldGenerate) {
-    await nextTick();
-    // 只有当需要生成时才调用
-    if (role === "user") {
-      handleGenerate();
-    } else {
-      // 如果插入的是 assistant 且要求生成，则触发生成
-    }
-  } else {
-    await nextTick();
-    scrollToBottom("smooth");
-  }
+	if (shouldGenerate) {
+		await nextTick();
+		// 只有当需要生成时才调用
+		if (role === "user") {
+			handleGenerate();
+		} else {
+			// 如果插入的是 assistant 且要求生成，则触发生成
+		}
+	} else {
+		await nextTick();
+		scrollToBottom("smooth");
+	}
 }
 
 // 背景样式
 const backgroundStyle = computed<CSSProperties>(() => {
-  const bg = background.value;
-  if (!bg || bg.type === "video") return {};
-  return {
-    backgroundImage: `url("${bg.src}")`,
-    backgroundSize:
-      bg.mode === "cover"
-        ? "cover"
-        : bg.mode === "contain"
-        ? "contain"
-        : "auto",
-    backgroundRepeat: bg.mode === "tile" ? "repeat" : "no-repeat",
-    backgroundPosition: "center",
-    position: "absolute",
-    inset: 0,
-    opacity: 0.4,
-    pointerEvents: "none",
-  };
+	const bg = background.value;
+	if (!bg || bg.type === "video") return {};
+	return {
+		backgroundImage: `url("${bg.src}")`,
+		backgroundSize:
+			bg.mode === "cover"
+				? "cover"
+				: bg.mode === "contain"
+					? "contain"
+					: "auto",
+		backgroundRepeat: bg.mode === "tile" ? "repeat" : "no-repeat",
+		backgroundPosition: "center",
+		position: "absolute",
+		inset: 0,
+		opacity: 0.4,
+		pointerEvents: "none",
+	};
 });
 </script>
 

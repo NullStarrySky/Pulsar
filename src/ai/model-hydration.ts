@@ -1,16 +1,15 @@
 // src/ai/model-hydration.ts
 
-import { createOpenAI } from "@ai-sdk/openai";
-import { createAzure } from "@ai-sdk/azure";
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createAzure } from "@ai-sdk/azure";
 import { createDeepSeek } from "@ai-sdk/deepseek";
-import { createXai } from "@ai-sdk/xai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { customFetch } from "@/utils/customFetch";
-
+import { createXai } from "@ai-sdk/xai";
 // 引入前端项目中的类型定义
 import type { ModelConfig } from "@/schema/modelConfig/modelConfig.types";
+import { customFetch } from "@/utils/customFetch";
 
 // 定义内置提供商及其对应的 SDK 对象
 // 请确保此处密钥名称和modelConfig.models.ts一致

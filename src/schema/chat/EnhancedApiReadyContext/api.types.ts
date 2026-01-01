@@ -1,7 +1,8 @@
 // src/schema/chat/EnhancedApiReadyContext/api.types.ts
+
+import type { FilePart, ImagePart, TextPart } from "ai";
 import type { role } from "../../shared.types";
 import type { ApiReadyMessage } from "../chat.types";
-import type { FilePart, ImagePart, TextPart } from "ai";
 
 // ========== 配置接口 ==========
 

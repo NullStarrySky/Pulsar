@@ -1,5 +1,5 @@
 // src/components/SchemaRenderer/SchemaRenderer.types.ts
-import { Component } from "vue";
+import type { Component } from "vue";
 
 export type SeparatorType = "Separator";
 export type ComponentName = string;

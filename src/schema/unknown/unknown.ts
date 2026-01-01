@@ -1,9 +1,9 @@
 // src/schema/unknown/unknown.ts
 
-import { SchemaDefinition } from "../SemanticType";
+import type { SchemaDefinition } from "../SemanticType";
 import UnknownFileRenderer from "./UnknownFileRenderer.vue";
 
-type Unknown = any;
+type Unknown = unknown;
 
 /**
  * 工厂函数：创建一个默认的统计数据对象。

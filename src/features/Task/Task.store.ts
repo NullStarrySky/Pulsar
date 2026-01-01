@@ -1,6 +1,6 @@
 // src/features/Task/Task.store.ts
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { computed, ref } from "vue";
 
 export type TaskStatus =
   | "pending"

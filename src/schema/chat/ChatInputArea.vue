@@ -1,50 +1,51 @@
 <!-- src/schema/chat/ChatInputArea.vue -->
+
 <script setup lang="ts">
-import { ref, computed } from "vue";
-import { type role } from "../shared.types.ts";
 import { useLocalStorage } from "@vueuse/core";
-import { isMobile } from "@/utils/platform"; // 导入
 import {
-  Paperclip,
-  Sparkles,
-  X,
-  Globe,
-  CornerDownLeft,
-  ChevronDown,
-  Bot,
-  User,
+	Bot,
+	ChevronDown,
+	CornerDownLeft,
+	Globe,
+	Paperclip,
+	Sparkles,
+	User,
+	X,
 } from "lucide-vue-next";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { computed, ref } from "vue";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { isMobile } from "@/utils/platform"; // 导入
+import { type role } from "../shared.types.ts";
 
 const props = defineProps<{ disabled?: boolean }>();
 const emit = defineEmits<{
-  (
-    e: "send",
-    content: string,
-    files: File[],
-    role: role,
-    generate: boolean
-  ): void;
-  (e: "polish", content: string, role: role): void;
+	(
+		e: "send",
+		content: string,
+		files: File[],
+		role: role,
+		generate: boolean,
+	): void;
+	(e: "polish", content: string, role: role): void;
 }>();
 
 const mobile = isMobile(); // 移动端状态
@@ -56,62 +57,62 @@ type SendKeyMode = "enter" | "ctrl-enter";
 const sendKeyMode = useLocalStorage<SendKeyMode>("chat-send-key-mode", "enter");
 
 const canSend = computed(
-  () => newMessage.value.trim().length > 0 || attachedFiles.value.length > 0
+	() => newMessage.value.trim().length > 0 || attachedFiles.value.length > 0,
 );
 
 function triggerFileInput() {
-  fileInput.value?.click();
+	fileInput.value?.click();
 }
 function handleFileSelect(event: Event) {
-  const target = event.target as HTMLInputElement;
-  if (target.files) attachedFiles.value.push(...Array.from(target.files));
+	const target = event.target as HTMLInputElement;
+	if (target.files) attachedFiles.value.push(...Array.from(target.files));
 }
 
 function handleSendAction(
-  targetRole: role = "user",
-  shouldGenerate: boolean = true
+	targetRole: role = "user",
+	shouldGenerate: boolean = true,
 ) {
-  if (!canSend.value || props.disabled) return;
-  emit(
-    "send",
-    newMessage.value,
-    [...attachedFiles.value],
-    targetRole,
-    shouldGenerate
-  );
-  newMessage.value = "";
-  attachedFiles.value = [];
-  if (fileInput.value) fileInput.value.value = "";
+	if (!canSend.value || props.disabled) return;
+	emit(
+		"send",
+		newMessage.value,
+		[...attachedFiles.value],
+		targetRole,
+		shouldGenerate,
+	);
+	newMessage.value = "";
+	attachedFiles.value = [];
+	if (fileInput.value) fileInput.value.value = "";
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if (mobile) return; // 移动端通常不使用键盘快捷键发送，依赖软键盘回车或点击按钮
-  if (e.key === "Enter") {
-    if (
-      sendKeyMode.value === "enter" &&
-      !e.shiftKey &&
-      !e.ctrlKey &&
-      !e.metaKey
-    ) {
-      e.preventDefault();
-      handleSendAction("user", true);
-    } else if (sendKeyMode.value === "ctrl-enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      handleSendAction("user", true);
-    }
-  }
+	if (mobile) return; // 移动端通常不使用键盘快捷键发送，依赖软键盘回车或点击按钮
+	if (e.key === "Enter") {
+		if (
+			sendKeyMode.value === "enter" &&
+			!e.shiftKey &&
+			!e.ctrlKey &&
+			!e.metaKey
+		) {
+			e.preventDefault();
+			handleSendAction("user", true);
+		} else if (sendKeyMode.value === "ctrl-enter" && (e.ctrlKey || e.metaKey)) {
+			e.preventDefault();
+			handleSendAction("user", true);
+		}
+	}
 }
 
 // 适配 Placeholder
 const placeholderText = computed(() => {
-  if (mobile) return "输入消息...";
-  return sendKeyMode.value === "enter"
-    ? "输入消息，按 Enter 发送..."
-    : "输入消息，按 Ctrl + Enter 发送...";
+	if (mobile) return "输入消息...";
+	return sendKeyMode.value === "enter"
+		? "输入消息，按 Enter 发送..."
+		: "输入消息，按 Ctrl + Enter 发送...";
 });
 
 const setDraft = (text: string) => {
-  newMessage.value = text;
+	newMessage.value = text;
 };
 defineExpose({ setDraft });
 </script>

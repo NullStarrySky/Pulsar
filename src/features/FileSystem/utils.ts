@@ -1,16 +1,17 @@
 // src/features/FileSystem/utils.ts
-import type { Component } from "vue";
+
 import {
-  User,
-  MessageSquare,
-  Book,
   BarChart2,
-  Sliders,
-  HelpCircle,
+  Book,
   FileJson,
   FileText,
+  HelpCircle,
+  MessageSquare,
+  Sliders,
+  User,
 } from "lucide-vue-next";
-import { SemanticTypeMap, type SemanticType } from "@/schema/SemanticType";
+import type { Component } from "vue";
+import { type SemanticType, SemanticTypeMap } from "@/schema/SemanticType";
 
 export interface ParsedFileName {
   displayName: string;

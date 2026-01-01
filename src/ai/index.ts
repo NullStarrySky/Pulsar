@@ -1,21 +1,21 @@
 // src/ai/index.ts
 
 import {
-  generateText as vercel_generateText,
-  streamText as vercel_streamText,
-  generateObject as vercel_generateObject,
-  streamObject as vercel_streamObject,
+  cosineSimilarity,
+  jsonSchema,
+  tool,
   embed as vercel_embed,
   embedMany as vercel_embedMany,
   experimental_generateImage as vercel_generateImage,
+  generateObject as vercel_generateObject,
   experimental_generateSpeech as vercel_generateSpeech,
-  tool,
-  jsonSchema,
-  cosineSimilarity,
+  generateText as vercel_generateText,
+  streamObject as vercel_streamObject,
+  streamText as vercel_streamText,
 } from "ai";
-import { hydrateModel } from "./model-hydration";
 //
 import { useFileSystemStore } from "@/features/FileSystem";
+import { hydrateModel } from "./model-hydration";
 
 // =================================================================================
 // 辅助函数

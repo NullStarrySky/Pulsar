@@ -1,12 +1,13 @@
 // src/features/CustomPage/CustomPage.store.ts
+
+import { debounce } from "lodash-es";
 import { defineStore } from "pinia";
-import { ref, computed, watch, reactive } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import {
   useFileSystemStore,
-  VirtualFolder,
   VirtualFile,
+  VirtualFolder,
 } from "@/features/FileSystem/FileSystem.store";
-import { debounce } from "lodash-es";
 
 export interface CustomPage {
   name: string; // 文件夹名称，也是唯一ID

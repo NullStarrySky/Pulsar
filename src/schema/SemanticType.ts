@@ -1,16 +1,15 @@
 // src/schema/SemanticType.ts
-import { Component } from "vue";
+import type { Component } from "vue";
+import { newManifest } from "@/components/EnvironmentSidebar/manifest";
+import type { Schema } from "@/components/SchemaRenderer/SchemaRenderer.types";
 import { CharacterDefinition } from "./character/character";
 import { ChatDefinition } from "./chat/chat";
 import { LorebookDefinition } from "./lorebook/lorebook";
-import { PresetDefinition } from "./preset/preset";
-import { StatisticDefinition } from "./statistic/statistic";
-import { SettingDefinition } from "./setting/setting";
 import { ModelConfigDefinition } from "./modelConfig/modelConfig";
+import { PresetDefinition } from "./preset/preset";
+import { SettingDefinition } from "./setting/setting";
+import { StatisticDefinition } from "./statistic/statistic";
 import { UnknownDefinition } from "./unknown/unknown";
-
-import { Schema } from "@/components/SchemaRenderer/SchemaRenderer.types";
-import { newManifest } from "@/components/EnvironmentSidebar/manifest";
 
 // --- 接口定义 ---
 // 更新接口以包含 createStructure 和 resolve

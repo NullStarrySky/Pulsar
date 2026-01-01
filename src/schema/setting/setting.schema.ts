@@ -1,11 +1,12 @@
+// src/schema/setting/setting.schema.ts
 import {
+  Blocks,
+  Bot,
+  History,
+  Image as ImageIcon, // 引入图标
   Library,
   ReplaceAll,
-  Blocks,
-  History,
   ScanLine,
-  Bot,
-  Image as ImageIcon, // 引入图标
 } from "lucide-vue-next";
 import type { Schema } from "@/components/SchemaRenderer/SchemaRenderer.types";
 import ExecutableStringEditor from "../lorebook/components/ExecutableStringEditor.vue";

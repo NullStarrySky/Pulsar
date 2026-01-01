@@ -1,14 +1,15 @@
 // src/features/ProcessManager/ProcessManager.store.ts
-import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { type as getOsType } from "@tauri-apps/plugin-os";
 import { join } from "@tauri-apps/api/path";
+import { type as getOsType } from "@tauri-apps/plugin-os";
+import { defineStore } from "pinia";
+import { computed, ref } from "vue";
 import {
   useFileSystemStore,
-  VirtualFolder,
   VirtualFile,
+  VirtualFolder,
 } from "@/features/FileSystem/FileSystem.store";
 
 export type ProcessStatus = "running" | "stopped" | "error";
@@ -31,7 +32,7 @@ export const useProcessManagerStore = defineStore("processManager", () => {
   const processes = ref<Record<string, Process>>({});
 
   const processList = computed(() => Object.values(processes.value));
-  let unlistenFunctions: UnlistenFn[] = [];
+  const unlistenFunctions: UnlistenFn[] = [];
 
   // --- 持久化辅助 ---
 

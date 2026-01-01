@@ -1,11 +1,12 @@
 // src/schema/chat/EnhancedApiReadyContext/utils/formatter.ts
-import { ApiReadyMessage } from "@/schema/chat/chat.types";
-import {
+
+import type { FilePart, TextPart } from "ai";
+import type { ApiReadyMessage } from "@/schema/chat/chat.types";
+import type {
   FinalApiMessage,
   FinalAssistantMessagePart,
   FinalUserMessagePart,
 } from "../api.types";
-import { TextPart, FilePart } from "ai";
 
 export function finalizeMessages(
   messages: ApiReadyMessage[]
@@ -42,7 +43,7 @@ export function finalizeMessages(
               type: "file",
               data: part.image,
               mediaType: part.mediaType ?? "application/octet-stream",
-              providerOptions: (part as any).providerOptions,
+              providerOptions: (part as any)?.providerOptions,
             } as FilePart;
           }
           return part as TextPart | FilePart;

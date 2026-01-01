@@ -1,5 +1,9 @@
 // src/schema/modelConfig/modelConfig.models.ts
-import { ProviderMetadata, ChatModel, GenericModel } from "./modelConfig.types";
+import type {
+  ChatModel,
+  GenericModel,
+  ProviderMetadata,
+} from "./modelConfig.types";
 
 // Helper function to convert string arrays to GenericModel arrays
 function toGenericModels(modelNames: string[]): GenericModel[] {

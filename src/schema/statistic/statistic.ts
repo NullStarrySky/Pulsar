@@ -1,8 +1,8 @@
 // src/schema/statistic/statistic.ts
 
-import { SchemaDefinition } from "../SemanticType";
-import { Statistic } from "./statistic.types";
+import type { SchemaDefinition } from "../SemanticType";
 import StatisticEditor from "./StatisticEditor.vue";
+import type { Statistic } from "./statistic.types";
 
 /**
  * 工厂函数：创建一个默认的统计数据对象。

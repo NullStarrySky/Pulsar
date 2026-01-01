@@ -1,22 +1,5 @@
 // src/features/FileSystem/FileSystem.store.ts
-import { defineStore } from "pinia";
-import { computed, ref, reactive, watch } from "vue";
-import {
-  readDir,
-  exists,
-  rename as fsRename,
-  mkdir as fsMkdir,
-  writeTextFile,
-  readTextFile,
-  readFile as fsReadFile,
-  writeFile as fsWriteFile,
-  remove as fsRemove,
-  copyFile as fsCopyFile,
-  stat as fsStat,
-  convertFileSrc as tauriConvertFileSrc,
-  appDataDir,
-  watch as fsWatch,
-} from "@/features/FileSystem/fs.api";
+
 import { invoke } from "@tauri-apps/api/core";
 import {
   BaseDirectory,
@@ -24,17 +7,35 @@ import {
   type WatchEvent,
 } from "@tauri-apps/plugin-fs";
 import { debounce, isEqual } from "lodash-es";
+import { defineStore } from "pinia";
 import urlJoin from "url-join";
-import { FSEventType, fsEmitter } from "./FileSystem.events";
-import type { Setting } from "@/schema/setting/setting.types";
+import { computed, reactive, ref, watch } from "vue";
+import {
+  appDataDir,
+  exists,
+  copyFile as fsCopyFile,
+  mkdir as fsMkdir,
+  readFile as fsReadFile,
+  remove as fsRemove,
+  rename as fsRename,
+  stat as fsStat,
+  watch as fsWatch,
+  writeFile as fsWriteFile,
+  readDir,
+  readTextFile,
+  convertFileSrc as tauriConvertFileSrc,
+  writeTextFile,
+} from "@/features/FileSystem/fs.api";
+import { useMetadataStore } from "@/features/Metadata/Metadata.store";
+import { useTaskStore } from "@/features/Task/Task.store";
 import type { ModelConfig } from "@/schema/modelConfig/modelConfig.types";
 import {
-  SemanticType,
-  SemanticTypeMap,
   getNewTypedFile,
+  type SemanticType,
+  SemanticTypeMap,
 } from "@/schema/SemanticType";
-import { useTaskStore } from "@/features/Task/Task.store";
-import { useMetadataStore } from "@/features/Metadata/Metadata.store";
+import type { Setting } from "@/schema/setting/setting.types";
+import { FSEventType, fsEmitter } from "./FileSystem.events";
 
 // 定义元数据结构接口（可选，为了类型提示）
 interface FileMetadata {
@@ -239,7 +240,7 @@ export abstract class VirtualNode {
               // 移除 appDataPath 前缀，并处理可能的分隔符
               relativePath = absPath
                 .slice(store.appDataPath.length)
-                .replace(/^[\/\\]/, ""); // 去除开头的 / 或 \
+                .replace(/^[/\\]/, ""); // 去除开头的 / 或 \
             }
             // windows兼容：将反斜杠转换为正斜杠
             relativePath = relativePath.replaceAll("\\", "/");

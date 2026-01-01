@@ -1,11 +1,11 @@
 // src/features/Metadata/Metadata.store.ts
 
-import { defineStore } from "pinia";
-import { ref, type Ref } from "vue";
 import Database from "@tauri-apps/plugin-sql";
+import { defineStore } from "pinia";
+import { type Ref, ref } from "vue";
 import {
-  fsEmitter,
   FSEventType,
+  fsEmitter,
 } from "@/features/FileSystem/FileSystem.events";
 
 /**

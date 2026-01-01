@@ -1,6 +1,6 @@
 // src/schema/chat/EnhancedApiReadyContext/utils/vectorUtils.ts
-import { ApiReadyMessage } from "@/schema/chat/chat.types";
-import { VectorEntry, VectorSearchResult } from "../api.types";
+import type { ApiReadyMessage } from "@/schema/chat/chat.types";
+import type { VectorEntry, VectorSearchResult } from "../api.types";
 
 function cosineSimilaritySync(vecA: number[], vecB: number[]): number {
   if (vecA.length !== vecB.length) return 0;

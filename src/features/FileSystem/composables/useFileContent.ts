@@ -1,13 +1,14 @@
 // src/features/FileSystem/composables/useFileContent.ts
-import { useFileSystemStore, VirtualFile } from "../FileSystem.store";
+
+import { debounce } from "lodash-es";
 import {
   computed,
-  unref,
-  watch,
   type Ref,
+  unref,
   type WritableComputedRef,
+  watch,
 } from "vue";
-import { debounce } from "lodash-es";
+import { useFileSystemStore, VirtualFile } from "../FileSystem.store";
 
 export function useFileContent<T = any>(
   path: Ref<string | null> | string | null,

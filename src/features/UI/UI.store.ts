@@ -1,40 +1,39 @@
 // src/features/UI/UI.store.ts
 
-import { defineStore } from "pinia";
-import {
-  ref,
-  computed,
-  watch,
-  type Ref,
-  shallowRef,
-  markRaw,
-  type Component,
-} from "vue";
 import {
   getCurrentWebviewWindow,
-  WebviewWindow,
+  type WebviewWindow,
 } from "@tauri-apps/api/webviewWindow";
 import {
-  useFileSystemStore,
-  VirtualFile,
-  TRASH_DIR_PATH,
-} from "../FileSystem/FileSystem.store";
-import { FSEventType, fsEmitter } from "../FileSystem/FileSystem.events";
-
-import {
-  Cpu,
   ClipboardList,
+  Cpu,
   Key,
+  Search,
   Server,
   Settings2,
-  Search,
 } from "lucide-vue-next";
-import ProcessPanel from "../ProcessManager/ProcessPanel.vue";
-import TaskPanel from "../Task/TaskPanel.vue";
-import SecretsPanel from "../Secrets/SecretsPanel.vue";
-import McpPanel from "../MCP/McpPanel.vue";
-import SearchSidebar from "@/components/layout/SearchSidebar.vue";
+import { defineStore } from "pinia";
+import {
+  type Component,
+  computed,
+  markRaw,
+  type Ref,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
 import ContentRouter from "@/components/EnvironmentSidebar/ContentRouter.vue";
+import SearchSidebar from "@/components/layout/SearchSidebar.vue";
+import { FSEventType, fsEmitter } from "../FileSystem/FileSystem.events";
+import {
+  TRASH_DIR_PATH,
+  useFileSystemStore,
+  VirtualFile,
+} from "../FileSystem/FileSystem.store";
+import McpPanel from "../MCP/McpPanel.vue";
+import ProcessPanel from "../ProcessManager/ProcessPanel.vue";
+import SecretsPanel from "../Secrets/SecretsPanel.vue";
+import TaskPanel from "../Task/TaskPanel.vue";
 
 export interface BottomBarItem {
   id: string;

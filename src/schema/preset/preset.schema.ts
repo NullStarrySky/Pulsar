@@ -1,12 +1,12 @@
 // src/schema/preset/preset.schema.ts
-import { Bot, SlidersHorizontal, ListPlus, BookText } from "lucide-vue-next";
+import { BookText, Bot, ListPlus, SlidersHorizontal } from "lucide-vue-next";
 import type { Schema } from "@/components/SchemaRenderer/SchemaRenderer.types";
 
 // --- 自定义组件导入 ---
 // 请确保这些路径相对于您的 schema.ts 文件的位置是正确的。
 
-import PromptsPanel from "./components/PromptsPanel.vue";
 import NeedToBakeRegexEditor from "./components/NeedToBakeRegexEditor.vue";
+import PromptsPanel from "./components/PromptsPanel.vue";
 /**
  * 定义了用于 Preset (预设) 的 Schema。
  * 该 Schema 描述了如何将 Preset 对象的属性渲染到 SchemaRenderer 组件中。

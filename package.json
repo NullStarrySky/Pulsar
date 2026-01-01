@@ -59,6 +59,7 @@
     "exa-js": "^2.0.6",
     "express": "^5.1.0",
     "express-ws": "^5.0.2",
+    "gemini": "^7.5.2",
     "katex": "^0.16.25",
     "lodash-es": "^4.17.21",
     "lucide-vue-next": "^0.553.0",
@@ -93,6 +94,7 @@
     "xterm-addon-fit": "^0.8.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.3.10",
     "@tauri-apps/cli": "^2",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^5.2.1",

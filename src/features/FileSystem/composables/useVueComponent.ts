@@ -1,23 +1,24 @@
 // src/features/FileSystem/composables/useVueComponent.ts
+
+import * as Pinia from "pinia";
+import * as Vue from "vue";
 import {
-  computed,
-  unref,
-  defineAsyncComponent,
-  type Ref,
   type Component,
   type ComputedRef,
+  computed,
+  defineAsyncComponent,
+  type Ref,
   shallowRef,
+  unref,
   watch,
 } from "vue";
-import * as Vue from "vue";
-import * as Pinia from "pinia";
 import { loadModule } from "vue3-sfc-loader";
 import { useFileSystemStore, VirtualFile } from "../FileSystem.store";
 
 // 缓存已编译的组件，避免重复编译
 const componentCache = new Map<string, Component>();
 
-// @ts-ignore
+// @ts-expect-error
 const tauri = window.__TAURI__ || {};
 
 const options = {

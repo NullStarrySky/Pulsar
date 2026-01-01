@@ -4,7 +4,7 @@ import { BasicEnv } from "./BasicEnv";
 
 export type Context = { [key: string]: any };
 
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
 
 /**
  * 从字符串中移除可选的 {{...}} 包裹并去除首尾空格。
@@ -28,7 +28,7 @@ function unwrapExpression(expression: string): string {
  */
 async function preprocessRemoteResources(
   expression: string,
-  remoteLoadFn: (id: string) => Promise<any>,
+  remoteLoadFn: (id: string) => Promise<any>
 ): Promise<{ finalBody: string; context: Context }> {
   const resourceRegex = /#\((['"])(.*?)\1\)/g;
   const matches = Array.from(expression.matchAll(resourceRegex));
@@ -97,7 +97,7 @@ export class ExpressionEngine {
   public async execute(
     content: string,
     context: { [key: string]: any },
-    envFuncName?: string,
+    envFuncName?: string
   ): Promise<any> {
     console.log("context:", context);
     // remoteLoad 函数现在应该直接在 context 代理上可用
@@ -105,7 +105,7 @@ export class ExpressionEngine {
     if (typeof remoteLoadFn !== "function") {
       if (content.includes("#(")) {
         throw new Error(
-          "Expression contains remote resource syntax #() but no 'remoteLoad' function was provided in the context.",
+          "Expression contains remote resource syntax #() but no 'remoteLoad' function was provided in the context."
         );
       }
     }
@@ -135,7 +135,7 @@ export class ExpressionEngine {
       }
     }
     const hasControlFlow = /return|;|if|for|while|switch|await/.test(
-      functionBody,
+      functionBody
     );
     if (envFuncName && typeof finalContext[envFuncName] === "function") {
       if (hasControlFlow) {
@@ -164,7 +164,7 @@ export class ExpressionEngine {
         error,
       });
       throw new Error(
-        `Execution Error in "${processedContent}": ${error.message}`,
+        `Execution Error in "${processedContent}": ${error.message}`
       );
     }
   }
@@ -184,7 +184,7 @@ function _valueToString(value: any): string {
  */
 export async function applyExpressions(
   text: string,
-  context: any,
+  context: any
 ): Promise<string> {
   // 1. 改为 async 并返回 Promise<string>
   if (!text || !text.includes("{{")) return text;
@@ -249,7 +249,7 @@ export async function applyExpressions(
  */
 export async function applyExpressionsWithSplitting(
   text: string,
-  context: any,
+  context: any
 ): Promise<any[]> {
   // -----------------------------------------------------------------
   // 阶段一: 解析并替换所有常规的 {{...}} 表达式
@@ -374,7 +374,7 @@ const BUILT_IN_ENVS: Record<string, Context> = {
 export async function executeCode(
   code: string,
   env: Context = {},
-  options: { builtInEnv?: string[] } = { builtInEnv: ["basic"] },
+  options: { builtInEnv?: string[] } = { builtInEnv: ["basic"] }
 ): Promise<any> {
   const engine = new ExpressionEngine();
   const unwrappedCode = unwrapExpression(code);

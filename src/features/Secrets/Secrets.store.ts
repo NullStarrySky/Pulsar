@@ -1,8 +1,9 @@
 // src/features/Secrets/Secrets.store.ts
-import { defineStore } from "pinia";
-import { ref } from "vue";
+
 import { invoke } from "@tauri-apps/api/core";
 import { push } from "notivue";
+import { defineStore } from "pinia";
+import { ref } from "vue";
 
 export const useSecretsStore = defineStore("secrets", () => {
   const keyList = ref<string[]>([]);
