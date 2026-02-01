@@ -3,12 +3,21 @@ import vue from "@vitejs/plugin-vue";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import vueDevTools from "vite-plugin-vue-devtools";
+import VueI18nPlugin from "@intlify/unplugin-vue-i18n/vite";
 
 // const host = "0.0.0.0";
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [vue(), tailwindcss(), vueDevTools()],
+  plugins: [
+    vue(), 
+    tailwindcss(), 
+    vueDevTools(),
+    VueI18nPlugin({
+      include: [path.resolve(__dirname, './src/locales/**')],
+      compositionOnly: true,
+    })
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
